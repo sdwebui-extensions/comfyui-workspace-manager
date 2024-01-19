@@ -13,6 +13,7 @@ import os
 import json
 from .version_control import update_version_if_outdated
 from .service.model_manager.model_installer import download_url_with_wget
+from comfy.cli_args import args
 
 WEB_DIRECTORY = "entry"
 NODE_CLASS_MAPPINGS = {}
@@ -22,7 +23,7 @@ version = "V1.0.0"
 print(f"### Loading: Workspace Manager ({version})")
 workspace_path = os.path.join(os.path.dirname(__file__))
 comfy_path = os.path.dirname(folder_paths.__file__)
-db_dir_path = os.path.join(workspace_path, "db")
+db_dir_path = os.path.join(args.data_dir, "models/db")
 
 
 workspace_app = web.Application()
@@ -54,7 +55,12 @@ def read_table(table):
         return None
     file_name = f'{db_dir_path}/{table}.json'
     if not os.path.exists(file_name):
-        return None
+        if args.just_ui:
+            file_name =f'{os.path.dirname(args.data_dir)}/models/db/{table}.json'
+            if not os.path.exists(file_name):
+                return None
+        else:
+            return None
 
     with open(file_name, 'r') as file:
         data = json.load(file)
