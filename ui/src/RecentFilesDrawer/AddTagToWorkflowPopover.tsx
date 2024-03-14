@@ -9,13 +9,14 @@ import {
   PopoverHeader,
   Input,
   HStack,
-  IconButton,
+  MenuItem,
 } from "@chakra-ui/react";
-import { useEffect, useState, useContext } from "react";
-import { Tag, Workflow, tagsTable, updateFlow } from "../db-tables/WorkspaceDB";
+import { useState, useContext } from "react";
+import { tagsTable, workflowsTable } from "../db-tables/WorkspaceDB";
 import { IconPlus, IconTag } from "@tabler/icons-react";
 import { MultiValue, Select } from "chakra-react-select";
 import { RecentFilesContext } from "../WorkspaceContext";
+import { Tag, Workflow } from "../types/dbTypes";
 
 type Props = {
   workflow: Workflow;
@@ -29,19 +30,25 @@ export default function AddTagToWorkflowPopover({ workflow }: Props) {
       value: t,
       label: t,
     })) ?? [];
+
   const [selectedTags, setSelectedTags] =
     useState<MultiValue<{ value: string; label: string }>>(initialTags);
-  useEffect(() => {
-    tagsTable && setAllTags(tagsTable.listAll() ?? []);
-  }, []);
-  useEffect(() => {
-    setSelectedTags(
-      workflow.tags?.map((t) => ({
-        value: t,
-        label: t,
-      })) ?? []
-    );
-  }, [workflow.tags]);
+
+  const addTag = async () => {
+    await tagsTable?.put({
+      name: newTagName,
+      workflowIDs: [],
+      updateTime: Date.now(),
+    });
+    await tagsTable?.listAll().then((tags) => setAllTags(tags ?? []));
+    setNewTagName("");
+  };
+
+  const onOpen = async () => {
+    const tags = await tagsTable?.listAll();
+    setAllTags(tags ?? []);
+  };
+
   if (tagsTable == null) {
     alert("Error: TagsTable is not loaded");
     return null;
@@ -53,14 +60,9 @@ export default function AddTagToWorkflowPopover({ workflow }: Props) {
   const maxTagMenuHeight = 37 * 5;
 
   return (
-    <Popover isLazy={true}>
+    <Popover isLazy={true} onOpen={onOpen} closeOnBlur={false} placement="auto">
       <PopoverTrigger>
-        <IconButton
-          aria-label="Delete confirm"
-          size={"sm"}
-          variant="ghost"
-          icon={<IconTag color={"#718096"} />}
-        />
+        <MenuItem icon={<IconTag />}>Add Tag</MenuItem>
       </PopoverTrigger>
       <PopoverContent>
         <PopoverArrow />
@@ -75,20 +77,20 @@ export default function AddTagToWorkflowPopover({ workflow }: Props) {
             options={tagOptions}
             menuIsOpen={true}
             value={selectedTags}
-            onChange={(selected) => {
+            onChange={async (selected) => {
               setSelectedTags(selected);
-              updateFlow(workflow.id, {
+              await workflowsTable?.updateMetaInfo(workflow.id, {
                 tags: selected.map((s) => s.value),
               });
-              onRefreshFilesList && onRefreshFilesList();
+              await onRefreshFilesList?.();
             }}
             chakraStyles={{
-              dropdownIndicator: (provided, state) => ({
+              dropdownIndicator: (provided) => ({
                 ...provided,
                 p: 0,
                 w: "30px",
               }),
-              menuList: (provided, state) => ({
+              menuList: (provided) => ({
                 ...provided,
                 shadow: "none",
                 pt: 0,
@@ -110,7 +112,7 @@ export default function AddTagToWorkflowPopover({ workflow }: Props) {
               variant={"flushed"}
               value={newTagName}
               onChange={(e) => {
-                setNewTagName(e.target.value);
+                setNewTagName(e.target.value.trim());
               }}
             />
             <Button
@@ -121,11 +123,7 @@ export default function AddTagToWorkflowPopover({ workflow }: Props) {
               size={"xs"}
               px={5}
               isDisabled={newTagName.length === 0}
-              onClick={() => {
-                tagsTable?.upsert(newTagName);
-                setAllTags(tagsTable?.listAll() ?? []);
-                setNewTagName("");
-              }}
+              onClick={addTag}
             >
               New Tag
             </Button>

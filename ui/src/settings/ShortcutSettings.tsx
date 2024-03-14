@@ -1,45 +1,117 @@
-import { Input, Stack, Text } from "@chakra-ui/react";
-import { useState } from "react";
+import {
+  Input,
+  Stack,
+  HStack,
+  Text,
+  Tooltip,
+  useToast,
+} from "@chakra-ui/react";
+import { useState, useEffect, useRef } from "react";
 import { userSettingsTable } from "../db-tables/WorkspaceDB";
+import { EShortcutKeys } from "../types/dbTypes";
 
 export function ShortcutSettings() {
-  const shortcutSetting = userSettingsTable?.getSetting("shortcuts")?.save;
-  const [shortcut, setShortcut] = useState(shortcutSetting ?? "Control+S");
-  const [isInputFocused, setIsInputFocused] = useState(false);
-  const handleFocus = () => setIsInputFocused(true);
-  const handleBlur = () => setIsInputFocused(false);
-  const handleKeyDown = (e: any) => {
+  const toast = useToast();
+  const configList = useRef<Array<{ title: string; key: EShortcutKeys }>>([
+    {
+      title: "Save current workflow",
+      key: EShortcutKeys.SAVE,
+    },
+    {
+      title: "Save as current workflow",
+      key: EShortcutKeys.SAVE_AS,
+    },
+  ]);
+  const [shortcut, setShortcut] = useState<Record<EShortcutKeys, string>>({
+    save: "",
+    saveAs: "",
+  });
+  const [focusedKey, setFocusedKey] = useState<EShortcutKeys>();
+
+  const handleKeyDown = async (e: any, updateKey: EShortcutKeys) => {
     e.preventDefault();
 
     let newShortcut = "";
     if (e.ctrlKey) newShortcut += "Control+";
+    if (e.metaKey) newShortcut += "Command+";
     if (e.shiftKey) newShortcut += "Shift+";
     if (e.altKey) newShortcut += "Alt+";
-
     // Avoid adding modifier keys alone
     if (
       newShortcut.length > 0 &&
       !["Control", "Shift", "Alt"].includes(e.key)
     ) {
       newShortcut += e.key.toUpperCase();
-      setShortcut(newShortcut);
-      userSettingsTable?.upsert({ shortcuts: { save: newShortcut } });
+
+      const dopyShortcuts = { ...shortcut };
+      delete dopyShortcuts[updateKey];
+
+      if (Object.values(dopyShortcuts).includes(newShortcut)) {
+        toast({
+          title: "Shortcut key conflict",
+          description: `The shortcut key 「${newShortcut}」 is already used, please
+          modify it.`,
+          status: "info",
+          duration: 3000,
+          position: "top",
+          isClosable: false,
+        });
+      } else {
+        await userSettingsTable?.upsert({
+          shortcuts: { ...shortcut, [updateKey]: newShortcut },
+        });
+        getShortcut();
+      }
     }
   };
+
+  const getShortcut = () => {
+    userSettingsTable?.getSetting("shortcuts").then((res) => {
+      const result = res ?? userSettingsTable?.defaultSettings.shortcuts;
+      setShortcut({
+        ...shortcut,
+        ...result,
+      });
+    });
+  };
+
+  useEffect(() => {
+    getShortcut();
+  }, []);
+
   return (
     <Stack>
-      <Text>Keyboard Shortcut - Save current workflow</Text>
-      {isInputFocused && (
-        <Text color="gray.500">Press shortcut key combinations to setup</Text>
-      )}
-      <Input
-        value={shortcut}
-        onKeyDown={handleKeyDown}
-        onFocus={handleFocus}
-        onBlur={handleBlur}
-        placeholder="Press a key combination"
-        readOnly
-      />
+      <Text>Keyboard Shortcut</Text>
+      {configList.current.map((config) => (
+        <HStack key={config.key}>
+          <Text fontSize="sm" w={170}>
+            {config.title}
+          </Text>
+          <Tooltip
+            label="Press shortcut key combinations to setup"
+            placement="bottom"
+            hasArrow
+            isOpen={focusedKey === config.key}
+          >
+            <Input
+              value={shortcut[config.key]}
+              onKeyDown={(e) => {
+                handleKeyDown(e, config.key);
+              }}
+              onFocus={() => {
+                setFocusedKey(config.key);
+              }}
+              onBlur={() => {
+                setFocusedKey(undefined);
+              }}
+              placeholder="Press a key combination"
+              readOnly
+              width="auto"
+              flex={1}
+            />
+          </Tooltip>
+        </HStack>
+      ))}
     </Stack>
   );
 }

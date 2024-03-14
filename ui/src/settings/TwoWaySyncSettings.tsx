@@ -1,26 +1,60 @@
-import { Checkbox, Input, Stack, Text } from "@chakra-ui/react";
-import { useState } from "react";
+import { Checkbox, Stack, Text } from "@chakra-ui/react";
+import { useState, useEffect } from "react";
 import { userSettingsTable } from "../db-tables/WorkspaceDB";
+import { useDialog } from "../components/AlertDialogProvider";
+import EnableTwowaySyncConfirm from "./EnableTwowaySyncConfirm";
 
 export default function TwoWaySyncSettings() {
-  const curSetting = userSettingsTable?.getSetting("twoWaySync");
+  const [checked, setChecked] = useState(false);
+  const [savingDir, setSavingDir] = useState("");
+  const { showDialog } = useDialog();
+  const getTwoWaySync = () => {
+    userSettingsTable?.getSetting("myWorkflowsDir").then((res) => {
+      setSavingDir(res ?? "undefined");
+    });
+    userSettingsTable?.getSetting("twoWaySync").then((res) => {
+      setChecked(res ?? false);
+    });
+  };
 
-  const [checked, setChecked] = useState(curSetting ?? false);
+  useEffect(() => {
+    getTwoWaySync();
+  }, []);
+  const onTwoWaySyncChange = async (e: any) => {
+    // setChecked(e.target.checked);
+    if (!e.target.checked) {
+      await userSettingsTable?.upsert({ twoWaySync: e.target.checked });
+      getTwoWaySync();
+      return;
+    }
+    const myWorkflowsDir =
+      await userSettingsTable?.getSetting("myWorkflowsDir");
+    showDialog(
+      <EnableTwowaySyncConfirm
+        myWorkflowsDir={myWorkflowsDir ?? "undefined"}
+      />,
+      [
+        {
+          label: "I have downloaded all my workflows and ready to enable",
+          onClick: async () => {
+            await userSettingsTable?.upsert({ twoWaySync: true });
+            getTwoWaySync();
+          },
+          colorScheme: "red",
+        },
+      ],
+    );
+  };
+
   return (
     <Stack>
-      <Text color={"GrayText"}>
-        If true this will auto detect when you have new .json files added to
-        your workspace saving directory in your disk and automatically import
-        them into your workspace for you
+      <Text>
+        Only for legacy two way sync users to get back their data. Do not
+        disable two way sync if you have already enabled it. It may cause some
+        unexpected issues.
       </Text>
-      <Checkbox
-        isChecked={checked}
-        onChange={(e) => {
-          setChecked(e.target.checked);
-          userSettingsTable?.upsert({ autoSave: e.target.checked });
-        }}
-      >
-        Enable two way sync (Experimental)
+      <Checkbox isChecked={checked} onChange={onTwoWaySyncChange}>
+        Enable two way sync
       </Checkbox>
     </Stack>
   );

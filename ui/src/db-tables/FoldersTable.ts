@@ -1,67 +1,74 @@
-import { getDB, saveDB } from "../Api";
-import { listWorkflows, updateFlow } from "./WorkspaceDB";
-import { Folder } from "../types/dbTypes";
+import { userSettingsTable, workflowsTable } from "./WorkspaceDB";
+import { EFlowOperationType, Folder } from "../types/dbTypes";
 import { validateOrSaveAllJsonFileMyWorkflows } from "../utils";
-import { getWorkspaceIndexDB, updateWorkspaceIndexDB } from "./IndexDBUtils";
 import { v4 as uuidv4 } from "uuid";
+import { TableBase } from "./TableBase";
+import { indexdb } from "./indexdb";
+import { TwowayFolderSyncAPI } from "../apis/TwowaySyncFolderApi";
+import { TwowaySyncAPI, scanLocalFiles } from "../apis/TwowaySyncApi";
 
-export class FoldersTable {
+export class FoldersTable extends TableBase<Folder> {
   static readonly TABLE_NAME = "folders";
-  private records: {
-    [id: string]: Folder;
-  };
-  private constructor() {
-    this.records = {};
+
+  constructor() {
+    super("folders");
   }
 
   static async load(): Promise<FoldersTable> {
     const instance = new FoldersTable();
-    let jsonStr = await getDB(FoldersTable.TABLE_NAME);
-    let json = jsonStr != null ? JSON.parse(jsonStr) : null;
-    if (json == null) {
-      const comfyspace = (await getWorkspaceIndexDB()) ?? "{}";
-      const comfyspaceData = JSON.parse(comfyspace);
-      json = comfyspaceData[FoldersTable.TABLE_NAME];
-    }
-    if (json != null) {
-      instance.records = json;
-    }
     return instance;
   }
-  public listAll(): Folder[] {
-    return Object.values(this.records);
-  }
-  public getRecords() {
-    return this.records;
-  }
-  public get(id: string): Folder | undefined {
-    return this.records[id];
-  }
-  public create(input: { name: string; parentFolderID?: string }): Folder {
-    const uniqueName = this.generateUniqueName(input.name);
+
+  public async create(input: {
+    name: string;
+    parentFolderID?: string;
+  }): Promise<Folder> {
+    const uniqueName = await this.generateUniqueName(
+      input.name,
+      input.parentFolderID,
+    );
+    const twoWaySyncEnabled = await userSettingsTable?.getSetting("twoWaySync");
+    const rel = await TwowayFolderSyncAPI.genFolderRelPath({
+      name: uniqueName,
+      parentFolderID: input.parentFolderID ?? "",
+    });
     const folder: Folder = {
-      id: uuidv4(),
+      id: twoWaySyncEnabled ? rel : uuidv4(),
       name: uniqueName,
       parentFolderID: input.parentFolderID ?? null,
       updateTime: Date.now(),
       createTime: Date.now(),
       type: "folder",
     };
-    this.records[folder.id] = folder;
-    saveDB("folders", JSON.stringify(this.records));
-    updateWorkspaceIndexDB();
 
+    if (twoWaySyncEnabled) {
+      await TwowayFolderSyncAPI.createFolder(folder);
+    } else {
+      await indexdb.folders.add(folder);
+      this.saveDiskDB();
+    }
     return folder;
   }
-  public update(
-    input: {
-      id: string;
-    } & Partial<Folder>
-  ) {
-    const folder = this.records[input.id];
-    if (folder == null) {
-      return;
+
+  public async update(id: string, input: Partial<Folder>) {
+    const twoWaySyncEnabled = await userSettingsTable?.getSetting("twoWaySync");
+    if (twoWaySyncEnabled) {
+      if ("parentFolderID" in input) {
+        await TwowayFolderSyncAPI.moveFolder(id, input["parentFolderID"] ?? "");
+      }
+      if ("name" in input) {
+        await TwowayFolderSyncAPI.renameFolder(id, input["name"] ?? "");
+      }
+      return null;
     }
+    const folder = await this.get(id);
+    if (folder == null) {
+      return null;
+    }
+    const nameChanged = "name" in input && input.name != folder.name;
+    const parentFolderChanged =
+      "parentFolderID" in input &&
+      input.parentFolderID != folder.parentFolderID;
     const newRecord = {
       ...folder,
       ...input,
@@ -69,29 +76,92 @@ export class FoldersTable {
     if (input.name != null) {
       newRecord.updateTime = Date.now();
     }
-    this.records[input.id] = newRecord;
-    saveDB("folders", JSON.stringify(this.records));
-    updateWorkspaceIndexDB();
-    // move or rename all workflows to the right directory(not required when folded state changes)
-    if (input.name != null || input.parentFolderID != null) {
+    if (parentFolderChanged) {
+      input.name = await this.generateUniqueName(
+        newRecord.name,
+        newRecord.parentFolderID ?? undefined,
+      );
+    }
+    await indexdb.folders.update(id, input);
+    this.saveDiskDB();
+
+    // folder moved or renamed - move all workflows to the right directory(not required when folded state changes)
+    if (nameChanged || parentFolderChanged) {
       validateOrSaveAllJsonFileMyWorkflows(true);
     }
+    return newRecord;
   }
-  public delete(id: string) {
-    delete this.records[id];
-    const childrenFlows = listWorkflows().filter(
-      (flow) => flow.parentFolderID == id
-    );
-    childrenFlows.forEach((flow) =>
-      updateFlow(flow.id, { parentFolderID: undefined })
-    );
-    saveDB("folders", JSON.stringify(this.records));
-    updateWorkspaceIndexDB();
-    validateOrSaveAllJsonFileMyWorkflows();
+  public async deleteFolder(
+    id: string,
+    flowOperationType: EFlowOperationType = EFlowOperationType.DELETE,
+  ) {
+    const twoWaySyncEnabled = await userSettingsTable?.getSetting("twoWaySync");
+    if (twoWaySyncEnabled) {
+      await scanLocalFiles(id, true, true).then((files) => {
+        files.forEach((file) => {
+          if (file.type === "workflow") {
+            console.log("delete workflow", file);
+            workflowsTable?.deleteFlow(file.id);
+          }
+        });
+      });
+      await TwowayFolderSyncAPI.deleteFolder(id);
+      return;
+    }
+    /**
+     * When deleting a folder, if there are files in the folder
+     * Breadth traverse all nested folders, find all files, move to root directory or delete as needed.
+     */
+    const allFlows = (await workflowsTable?.listAll()) ?? [];
+    const allFolders = await this.listAll();
+    const nestedFolderIdStack = [id];
+
+    while (nestedFolderIdStack.length > 0) {
+      const curFolderId = nestedFolderIdStack.shift();
+
+      if (curFolderId) {
+        for (const flow of allFlows) {
+          if (flow.parentFolderID === curFolderId) {
+            switch (flowOperationType) {
+              case EFlowOperationType.DELETE:
+                await workflowsTable?.deleteFlow(flow.id);
+                break;
+              case EFlowOperationType.MOVE_TO_ROOT_FOLDER:
+                await workflowsTable?.updateFolder(flow.id, {
+                  parentFolderID: undefined,
+                });
+                break;
+            }
+          }
+        }
+
+        await indexdb.folders.delete(curFolderId);
+        const curNestedFolderIds = allFolders
+          .filter((f) => f.parentFolderID === curFolderId)
+          .map((f) => f.id);
+
+        if (curNestedFolderIds.length) {
+          nestedFolderIdStack.push(...curNestedFolderIds);
+        }
+      }
+    }
+
+    this.saveDiskDB();
   }
-  public generateUniqueName(name?: string) {
+
+  public async generateUniqueName(name?: string, parentFolderID?: string) {
+    const twoWaySyncEnabled = await userSettingsTable?.getSetting("twoWaySync");
+    if (twoWaySyncEnabled) {
+      const fileName = await TwowaySyncAPI.genFileUniqueName(
+        name ?? "New folder",
+        parentFolderID ?? "",
+      );
+      return fileName ?? "New folder";
+    }
     let newFlowName = name ?? "New folder";
-    const folderNameList = this.listAll()?.map((f) => f.name);
+    const folderNameList = await this.listAll().then((list) =>
+      list.filter((f) => f.parentFolderID == parentFolderID).map((f) => f.name),
+    );
     if (folderNameList.includes(newFlowName)) {
       let num = 2;
       let flag = true;

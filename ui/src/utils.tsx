@@ -1,29 +1,24 @@
-// @ts-ignore
-import { deleteFile } from "./Api";
+import { deleteFile, updateFile } from "./Api";
 import { ESortTypes } from "./RecentFilesDrawer/types";
+import { workflowsTable, userSettingsTable } from "./db-tables/WorkspaceDB";
 import {
-  batchCreateFlows,
-  foldersTable,
-  listWorkflows,
+  generateFilePathAbsolute,
   saveJsonFileMyWorkflows,
-  userSettingsTable,
-  Workflow,
-} from "./db-tables/WorkspaceDB";
-import { generateFilePathAbsolute } from "./db-tables/DiskFileUtils";
-import { Folder } from "./types/dbTypes";
-// @ts-ignore
-import { app, ComfyApp } from "/scripts/app.js";
+} from "./db-tables/DiskFileUtils";
+import { Folder, Workflow, EShortcutKeys } from "./types/dbTypes";
+// @ts-expect-error ComfyUI import
+import { app } from "/scripts/app.js";
+import {
+  COMFYSPACE_TRACKING_FIELD_NAME,
+  LEGACY_COMFYSPACE_TRACKING_FIELD_NAME,
+} from "./const";
 
-export type Route =
-  | "root"
-  | "customNodes"
-  | "recentFlows"
-  | "gallery"
-  | "myModels";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+declare let LiteGraph: any, LGraph: any, LGraphCanvas: any;
 
 // copied from app.js
 function sanitizeNodeName(string: string): string {
-  let entityMap: Record<string, string> = {
+  const entityMap: Record<string, string> = {
     "&": "",
     "<": "",
     ">": "",
@@ -38,14 +33,13 @@ function sanitizeNodeName(string: string): string {
 }
 export function findMissingNodes(): string[] {
   const missingNodeTypes = [];
-  for (let n of app.graph._nodes) {
+  for (const n of app.graph._nodes) {
     // Patch T2IAdapterLoader to ControlNetLoader since they are the same node now
     if (n.type == "T2IAdapterLoader") n.type = "ControlNetLoader";
     if (n.type == "ConditioningAverage ") n.type = "ConditioningAverage"; //typo fix
     if (n.type == "SDV_img2vid_Conditioning")
       n.type = "SVD_img2vid_Conditioning"; //typo fix
     // Find missing node types
-    // @ts-ignore
     if (!(n.type in LiteGraph.registered_node_types)) {
       n.type = sanitizeNodeName(n.type);
       missingNodeTypes.push(n.type);
@@ -70,7 +64,8 @@ function isValidFileName(fileName: string) {
   }
 
   // Windows reserved characters
-  const windowsInvalidChars = /[<>:"\/\\|?*\x00-\x1F]/;
+  // eslint-disable-next-line no-control-regex
+  const windowsInvalidChars = /[<>:"/\\|?*\x00-\x1F]/;
   if (windowsInvalidChars.test(fileName)) {
     return false;
   }
@@ -101,7 +96,8 @@ function isValidFileName(fileName: string) {
 
 export function formatTimestamp(
   unixTimestamp: number,
-  showSec: boolean = false
+  showHourMinue: boolean = true,
+  showSec: boolean = false,
 ) {
   // Create a new Date object from the UNIX timestamp
   const date = new Date(unixTimestamp);
@@ -114,7 +110,10 @@ export function formatTimestamp(
   const minutes = String(date.getMinutes()).padStart(2, "0");
   const seconds = String(date.getSeconds()).padStart(2, "0");
   // Format the date and time string
-  let res = `${month}-${day}-${year} ${hours}:${minutes}`;
+  const res = `${month}-${day}-${year}`;
+  if (showHourMinue) {
+    return res + ` ${hours}:${minutes}`;
+  }
   if (showSec) {
     return res + `:${seconds}`;
   }
@@ -129,7 +128,7 @@ export function formatTimestamp(
  */
 export function sortFlows(
   flows: Workflow[] = [],
-  sortType: ESortTypes = ESortTypes.RECENTLY_MODIFIED
+  sortType: ESortTypes = ESortTypes.RECENTLY_MODIFIED,
 ) {
   const copyFlows = [...flows];
   if (copyFlows.length) {
@@ -152,10 +151,13 @@ export function sortFlows(
   return copyFlows;
 }
 export async function validateOrSaveAllJsonFileMyWorkflows(
-  deleteEmptyFolder = false
+  deleteEmptyFolder = false,
 ) {
-  for (const workflow of listWorkflows()) {
-    const fullPath = generateFilePathAbsolute(workflow);
+  const twoWaySync = await userSettingsTable?.getSetting("twoWaySync");
+  if (twoWaySync) return; // disable this function in two way sync mode
+  const flowList = (await workflowsTable?.listAll()) ?? [];
+  for (const workflow of flowList) {
+    const fullPath = await generateFilePathAbsolute(workflow);
     if (workflow.filePath != fullPath) {
       // file path changed
       workflow.filePath != null &&
@@ -167,7 +169,7 @@ export async function validateOrSaveAllJsonFileMyWorkflows(
 
 export const sortFileItem = (
   items: Array<Workflow | Folder>,
-  sortType: ESortTypes = ESortTypes.RECENTLY_MODIFIED
+  sortType: ESortTypes = ESortTypes.RECENTLY_MODIFIED,
 ) => {
   const copyFlows = [...items];
   switch (sortType) {
@@ -194,16 +196,27 @@ export function insertWorkflowToCanvas(json: string, insertPos?: number[]) {
   } else {
     graphData = structuredClone(graphData);
   }
-  // @ts-ignore
-  var tempGraph = new LGraph();
-  tempGraph.configure(graphData);
-  const prevClipboard = localStorage.getItem("litegrapheditor_clipboard");
 
-  const tempCanvas = document.createElement("canvas");
-  // @ts-ignore
-  let canvas = new LGraphCanvas(tempCanvas, tempGraph);
-  canvas.selectNodes(tempGraph._nodes);
-  canvas.copyToClipboard(tempGraph._nodes);
+  let tempGraph = new LGraph();
+  const hiddenCanvas = document.createElement("canvas");
+  hiddenCanvas.style.display = "none"; // Make it hidden
+  document.body.appendChild(hiddenCanvas); // Append to the body to make it part of the DOM
+  let tempCanvas = new LGraphCanvas(hiddenCanvas, tempGraph);
+
+  const prevClipboard = localStorage.getItem("litegrapheditor_clipboard");
+  const prevGraph = app.graph;
+  const prevCanvas = app.canvas;
+  app.canvas = tempCanvas;
+  app.graph = tempGraph;
+  tempGraph.configure(graphData);
+  app.canvas.copyToClipboard(tempGraph._nodes);
+
+  // clear the tempGraph and remove the hiddenCanvas
+  tempCanvas.graph.clear();
+  document.body.removeChild(hiddenCanvas);
+
+  app.graph = prevGraph;
+  app.canvas = prevCanvas;
   const priorPos = app.canvas.graph_mouse;
   if (insertPos) {
     insertPos[0] -= 15;
@@ -215,112 +228,40 @@ export function insertWorkflowToCanvas(json: string, insertPos?: number[]) {
   if (prevClipboard) {
     localStorage.setItem("litegrapheditor_clipboard", prevClipboard);
   }
-  // Nullify the references to help with garbage collection
+  // Nullify the temporary graph and canvas references for garbage collection
   tempGraph = null;
-  canvas = null;
+  tempCanvas = null;
 }
 
-export function generateUniqueName(name?: string) {
-  /**
-   * Generate a unique name
-   * For imported scenes, the default name is the file name.
-   * For new scenes, the default name is Untitled Flow.
-   * Get the full workflow list. If the default name already exists, search incrementally starting from 2.
-   * Looks for a unique name in the format `${default name} ${number}`.
-   */
-  let newFlowName = name ?? "Untitled Flow";
-  const flowNameList = listWorkflows()?.map((flow) => flow.name);
-  if (flowNameList.includes(newFlowName)) {
-    let num = 2;
-    let flag = true;
-    while (flag) {
-      if (flowNameList.includes(`${newFlowName} ${num}`)) {
-        num++;
-      } else {
-        newFlowName = `${newFlowName} ${num}`;
-        flag = false;
+export const matchShortcut = async (event: KeyboardEvent) => {
+  const shortcuts =
+    (await userSettingsTable?.getSetting("shortcuts")) ??
+    userSettingsTable?.defaultSettings.shortcuts;
+
+  if (!shortcuts) return false;
+
+  for (const shortcutType in shortcuts) {
+    const shortcutString = shortcuts[shortcutType as EShortcutKeys];
+    const keys = shortcutString.split("+");
+    const pressedKeys: Record<string, boolean> = {
+      Control: event.ctrlKey,
+      Shift: event.shiftKey,
+      Alt: event.altKey,
+      Command: event.metaKey,
+      [event.key.toUpperCase()]: true,
+    };
+    for (const key in pressedKeys) {
+      if (!pressedKeys[key]) {
+        delete pressedKeys[key];
       }
     }
+    if (
+      keys.length === Object.keys(pressedKeys).length &&
+      keys.every((key) => pressedKeys[key])
+    ) {
+      return shortcutType;
+    }
   }
-  return newFlowName;
-}
-
-export function getPngMetadata(file: File) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      // Get the PNG data as a Uint8Array
-      // @ts-expect-error
-      const pngData = new Uint8Array(event.target.result);
-      const dataView = new DataView(pngData.buffer);
-
-      // Check that the PNG signature is present
-      if (dataView.getUint32(0) !== 0x89504e47) {
-        console.error("Not a valid PNG file");
-        reject();
-      }
-
-      // Start searching for chunks after the PNG signature
-      let offset = 8;
-      const txt_chunks: Record<string, string> = {};
-      // Loop through the chunks in the PNG file
-      while (offset < pngData.length) {
-        // Get the length of the chunk
-        const length = dataView.getUint32(offset);
-        // Get the chunk type
-        const type = String.fromCharCode(
-          ...pngData.slice(offset + 4, offset + 8)
-        );
-        if (type === "tEXt" || type == "comf") {
-          // Get the keyword
-          let keyword_end = offset + 8;
-          while (pngData[keyword_end] !== 0) {
-            keyword_end++;
-          }
-          const keyword = String.fromCharCode(
-            ...pngData.slice(offset + 8, keyword_end)
-          );
-          // Get the text
-          const contentArraySegment = pngData.slice(
-            keyword_end + 1,
-            offset + 8 + length
-          );
-          const contentJson = Array.from(contentArraySegment)
-            .map((s) => String.fromCharCode(s))
-            .join("");
-          txt_chunks[keyword] = contentJson;
-        }
-
-        offset += 12 + length;
-      }
-
-      resolve(txt_chunks);
-    };
-
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-export const matchSaveWorkflowShortcut = (event: KeyboardEvent) => {
-  const short = userSettingsTable?.getSetting("shortcuts")?.save;
-  if (!short) return false;
-  return matchShortcut(event, short);
-};
-
-export const matchShortcut = (
-  event: KeyboardEvent,
-  shortcutString: string
-): boolean => {
-  const keys = shortcutString.split("+");
-  const keyEvent: Record<string, boolean> = {
-    Control: event.ctrlKey,
-    Shift: event.shiftKey,
-    Alt: event.altKey,
-    Command: event.metaKey,
-    [event.key.toUpperCase()]: true,
-  };
-
-  return keys.every((key) => keyEvent[key]);
 };
 
 export function isImageFormat(fileName: string) {
@@ -338,37 +279,48 @@ export function getFileUrl(relativePath: string) {
   return `/workspace/view_media?filename=${relativePath}`;
 }
 
-export async function syncNewFlowOfLocalDisk(
-  singleFlowList: Workflow[],
-  folderList: {
-    name: string;
-    list: Workflow[];
-  }[]
-) {
-  if (singleFlowList.length) {
-    await batchCreateFlows(singleFlowList, true);
+export function getWorkflowIdInUrlHash() {
+  const hashArr = window.location.hash.slice(1).split("/");
+  const workspaceId = hashArr.find((h) => h.includes("workspaceId@"));
+  return workspaceId ? workspaceId.split("@")[1] : null;
+}
+
+/**
+ * Generate url hash containing workflowId;
+ * If workspaceId@ exists, replace it, if it does not exist, append it.
+ * This operation will not damage the original hash.
+ */
+export function generateUrlHashWithFlowId(id: string) {
+  const hashArr = window.location.hash.slice(1).split("/");
+  const workspaceIdIndex = hashArr.findIndex((h) => h.includes("workspaceId@"));
+  const newWorkflowId = `workspaceId@${id}`;
+  if (workspaceIdIndex >= 0) {
+    hashArr[workspaceIdIndex] = newWorkflowId;
+  } else {
+    hashArr.push(newWorkflowId);
   }
+  return `${hashArr.join("/")}`;
+}
 
-  if (folderList.length) {
-    const currentFolderList = foldersTable?.listAll();
+export const openWorkflowInNewTab = (workflowID: string) => {
+  const newHash = generateUrlHashWithFlowId(workflowID);
+  window.open(`${window.location.origin}/#${newHash}`);
+};
 
-    folderList.forEach(async (folder) => {
-      const existFolder = currentFolderList?.find(
-        (f) => f.name === folder.name
-      );
-
-      let folderId;
-
-      if (existFolder) {
-        folderId = existFolder.id;
-      } else {
-        const newFolder = foldersTable?.create({
-          name: folder.name,
-        });
-        folderId = newFolder?.id;
-      }
-
-      await batchCreateFlows(folder.list, true, folderId);
-    });
+export async function rewriteAllLocalFiles() {
+  const flowList = (await workflowsTable?.listAll()) ?? [];
+  for (const workflow of flowList) {
+    try {
+      const fullPath = await generateFilePathAbsolute(workflow);
+      const flow = JSON.parse(workflow.json);
+      flow.extra[COMFYSPACE_TRACKING_FIELD_NAME] = {
+        id: workflow.id,
+        name: workflow.name,
+      };
+      delete flow.extra[LEGACY_COMFYSPACE_TRACKING_FIELD_NAME];
+      fullPath && (await updateFile(fullPath, JSON.stringify(flow)));
+    } catch (error) {
+      console.error(error);
+    }
   }
 }

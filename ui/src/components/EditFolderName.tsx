@@ -32,18 +32,20 @@ export default function EditFolderNameModal({ folder, onclose }: Props) {
     submitError && setSubmitError("");
   };
 
-  const onSubmit = () => {
+  const onSubmit = async () => {
     const trimEditName = editName.trim();
     setEditName(trimEditName);
     if (trimEditName === folder.name) return onclose();
-    const folderNameList = foldersTable?.listAll()?.map((f) => f.name) ?? [];
-    if (folderNameList.includes(trimEditName)) {
+    const uniqName = await foldersTable?.generateUniqueName(
+      trimEditName,
+      folder.parentFolderID ?? "",
+    );
+    if (uniqName !== trimEditName) {
       setSubmitError(
-        "The name is duplicated, please modify it and submit again."
+        "The name is duplicated, please modify it and submit again.",
       );
     } else {
-      foldersTable?.update({
-        id: folder.id,
+      await foldersTable?.update(folder.id, {
         name: trimEditName,
       });
       onRefreshFilesList && onRefreshFilesList();
@@ -65,7 +67,7 @@ export default function EditFolderNameModal({ folder, onclose }: Props) {
               onChange={handleChange}
               autoFocus
               onKeyUp={(e) => {
-                e.code === "Enter" && !submitError && onSubmit();
+                e.code === "Enter" && !submitError && editName && onSubmit();
               }}
             />
             {submitError && <FormErrorMessage>{submitError}</FormErrorMessage>}

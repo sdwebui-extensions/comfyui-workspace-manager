@@ -1,14 +1,35 @@
-import { useState, useCallback, MouseEvent, useRef } from "react";
+import {
+  useState,
+  useCallback,
+  MouseEvent,
+  useRef,
+  PropsWithChildren,
+} from "react";
 
 const POSITION = { x: 0, y: 0 };
 
-export default function Draggable({ children, onDragEnd }) {
+interface Props {
+  onDragEnd: (position: { x: number; y: number }) => void;
+  dragIconId: string;
+}
+
+export default function Draggable({
+  children,
+  onDragEnd,
+  dragIconId,
+}: PropsWithChildren<Props>) {
   const originRef = useRef(POSITION);
   const isDraggingRef = useRef(false);
   const [translation, setTranslation] = useState(POSITION);
 
   const handleMouseDown = (e: MouseEvent) => {
-    if ([e.target?.id, e.target?.parentNode?.id].includes("dragPanelIcon")) {
+    if (
+      !(e.target instanceof Element) ||
+      !(e.target.parentNode instanceof Element)
+    ) {
+      return;
+    }
+    if ([e.target?.id, e.target?.parentNode?.id].includes(dragIconId)) {
       originRef.current = {
         x: e.clientX,
         y: e.clientY,
@@ -21,7 +42,7 @@ export default function Draggable({ children, onDragEnd }) {
     }
   };
 
-  const handleMouseMove = useCallback((e: MouseEvent) => {
+  const handleMouseMove = useCallback((e: globalThis.MouseEvent) => {
     const translation = {
       x: e.clientX - originRef.current.x,
       y: e.clientY - originRef.current.y,
@@ -32,7 +53,9 @@ export default function Draggable({ children, onDragEnd }) {
 
   const handleMouseUp = useCallback(() => {
     setTranslation((state) => {
-      onDragEnd(state);
+      setTimeout(() => {
+        onDragEnd(state);
+      }, 0);
       return POSITION;
     });
     isDraggingRef.current = false;

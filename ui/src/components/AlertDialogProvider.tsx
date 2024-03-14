@@ -21,10 +21,18 @@ interface DialogButton {
   label: string;
   onClick: () => void;
   colorScheme?: string;
+  icon?: React.ReactElement;
 }
 
 interface DialogContextType {
-  showDialog: (message: string, buttons: DialogButton[]) => void;
+  showDialog: (
+    message: string | React.ReactNode,
+    buttons?: (DialogButton | null)[],
+    options?: {
+      hideCloseIcon?: boolean;
+      closeOnOverlayClick?: boolean;
+    },
+  ) => void;
 }
 
 const DialogContext = createContext<DialogContextType | undefined>(undefined);
@@ -41,15 +49,22 @@ export const AlertDialogProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [message, setMessage] = useState("");
-  const [buttons, setButtons] = useState<DialogButton[]>([]);
+  const [message, setMessage] = useState<string | React.ReactNode>("");
+  const [buttons, setButtons] = useState<(DialogButton | null)[]>([]);
+  const [hideCloseIcon, setHideCloseIcon] = useState(false);
+  const [closeOnOverlayClick, setCloseOnOverlayClick] = useState(true);
   const cancelRef = React.useRef<HTMLButtonElement>(null);
 
-  const showDialog = useCallback((message: string, buttons: DialogButton[]) => {
-    setMessage(message);
-    setButtons(buttons);
-    setIsOpen(true);
-  }, []);
+  const showDialog: DialogContextType["showDialog"] = useCallback(
+    (message, buttons, options) => {
+      setMessage(message);
+      setButtons(buttons ?? []);
+      setIsOpen(true);
+      setHideCloseIcon(options?.hideCloseIcon ?? false);
+      setCloseOnOverlayClick(options?.closeOnOverlayClick ?? true);
+    },
+    [],
+  );
 
   const handleClose = useCallback(() => {
     setIsOpen(false);
@@ -63,7 +78,8 @@ export const AlertDialogProvider: React.FC<{ children: ReactNode }> = ({
           isOpen={isOpen}
           leastDestructiveRef={cancelRef}
           onClose={handleClose}
-          size={"lg"}
+          size={"xl"}
+          closeOnOverlayClick={closeOnOverlayClick}
         >
           <DarkMode>
             <AlertDialogOverlay>
@@ -72,24 +88,31 @@ export const AlertDialogProvider: React.FC<{ children: ReactNode }> = ({
                   fontSize="lg"
                   fontWeight="bold"
                 ></AlertDialogHeader>
-                <AlertDialogCloseButton />
+                {!hideCloseIcon ? <AlertDialogCloseButton /> : null}
 
-                <AlertDialogBody>{message}</AlertDialogBody>
+                <AlertDialogBody whiteSpace="pre-wrap">
+                  {message}
+                </AlertDialogBody>
 
                 <AlertDialogFooter>
-                  {buttons.map((button, index) => (
-                    <Button
-                      colorScheme={button.colorScheme ?? "gray"}
-                      onClick={() => {
-                        button.onClick();
-                        handleClose();
-                      }}
-                      ml={3}
-                      key={index}
-                    >
-                      {button.label}
-                    </Button>
-                  ))}
+                  {buttons.map(
+                    (button, index) =>
+                      button && (
+                        <Button
+                          colorScheme={button.colorScheme ?? "gray"}
+                          onClick={() => {
+                            button.onClick();
+                            handleClose();
+                          }}
+                          iconSpacing={1}
+                          leftIcon={button.icon}
+                          ml={3}
+                          key={index}
+                        >
+                          {button.label}
+                        </Button>
+                      ),
+                  )}
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialogOverlay>

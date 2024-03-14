@@ -1,29 +1,19 @@
-import {
-  Box,
-  Menu,
-  MenuList,
-  MenuItem,
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
-  PopoverCloseButton,
-  PopoverBody,
-  Button,
-  PopoverArrow,
-  Text,
-} from "@chakra-ui/react";
-import { MouseEvent, useContext, useRef, useState } from "react";
+import { Box, Menu, MenuList, MenuItem } from "@chakra-ui/react";
+import { MouseEvent, useContext, useState } from "react";
 import { RecentFilesContext } from "../WorkspaceContext";
-import { foldersTable } from "../db-tables/WorkspaceDB";
+import { workflowsTable, foldersTable } from "../db-tables/WorkspaceDB";
 import EditFolderNameModal from "../components/EditFolderName";
 import {
-  IconFileImport,
   IconFolderPlus,
   IconPencil,
+  IconPlus,
   IconTrash,
 } from "@tabler/icons-react";
-import { Folder } from "../types/dbTypes";
+import { EFlowOperationType, Folder } from "../types/dbTypes";
 import ImportFlowsFileInput from "./ImportFlowsFileInput";
+import { defaultGraph } from "../defaultGraph";
+import { useDialog } from "../components/AlertDialogProvider";
+import { getFileCountInFolder } from "../db-tables/DiskFileUtils";
 
 type Props = {
   menuPosition: { x: number; y: number };
@@ -38,22 +28,65 @@ export default function FilesListFolderItemRightClickMenu({
   onClose,
 }: Props) {
   const [isRenameOpen, setIsRenameOpen] = useState(false);
-  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const { onRefreshFilesList } = useContext(RecentFilesContext);
-  const onClickNewFolder = (e: MouseEvent<HTMLButtonElement>) => {
+  const { showDialog } = useDialog();
+
+  const onClickNewFolder = async (e: MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
-    foldersTable?.create({
-      name: "New folder",
+    await foldersTable?.create({
+      name: "New Folder",
       parentFolderID: folder.id,
     });
     onRefreshFilesList && onRefreshFilesList();
   };
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const onClickNewFile = async (e: MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    await workflowsTable?.createFlow({
+      json: JSON.stringify(defaultGraph),
+      parentFolderID: folder.id,
+    });
+    onRefreshFilesList && onRefreshFilesList();
+  };
+
+  const openDeleteConfirm = async (e: MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    const fileCount = await getFileCountInFolder(folder.id);
+    showDialog(
+      `Do you want to delete the ${fileCount} files inside the folder too?`,
+      [
+        // {
+        //   label: "Keep and move to root directory",
+        //   colorScheme: "teal",
+        //   onClick: () => {
+        //     onDelete(EFlowOperationType.MOVE_TO_ROOT_FOLDER);
+        //   },
+        // },
+        {
+          label: "Delete all files",
+          colorScheme: "red",
+          onClick: () => {
+            onDelete(EFlowOperationType.DELETE);
+          },
+        },
+      ],
+    );
+  };
+
+  const onDelete = async (operationType: EFlowOperationType) => {
+    await foldersTable?.deleteFolder(folder.id, operationType);
+    onClose();
+    onRefreshFilesList && onRefreshFilesList();
+  };
 
   return (
     <>
       <Box position="absolute" top={menuPosition.y} left={menuPosition.x}>
-        <Menu isOpen={isopen} onClose={onClose} isLazy>
+        <Menu
+          isOpen={isopen}
+          onClose={onClose}
+          isLazy
+          lazyBehavior="keepMounted"
+        >
           <MenuList>
             <MenuItem
               icon={<IconPencil size={19} />}
@@ -67,7 +100,7 @@ export default function FilesListFolderItemRightClickMenu({
             </MenuItem>
             <MenuItem
               icon={<IconTrash size={19} />}
-              onClick={() => setIsDeleteOpen(true)}
+              onClick={openDeleteConfirm}
             >
               Delete
             </MenuItem>
@@ -77,66 +110,22 @@ export default function FilesListFolderItemRightClickMenu({
             >
               New folder
             </MenuItem>
-            <MenuItem
-              onClick={(e) => {
-                e.stopPropagation();
-                fileInputRef.current?.click();
-              }}
-              icon={<IconFileImport size={19} />}
-            >
-              Import workflows
+            <MenuItem onClick={onClickNewFile} icon={<IconPlus size={19} />}>
+              New file
             </MenuItem>
+            <ImportFlowsFileInput
+              parentFolderID={folder.id}
+              onlyImportFile={true}
+            />
           </MenuList>
         </Menu>
       </Box>
-      <ImportFlowsFileInput
-        parentFolderID={folder.id}
-        fileInputRef={fileInputRef}
-      />
+
       {isRenameOpen && (
         <EditFolderNameModal
           folder={folder}
           onclose={() => setIsRenameOpen(false)}
         />
-      )}
-      {isDeleteOpen && (
-        <Popover
-          returnFocusOnClose={false}
-          isOpen={true}
-          onClose={() => setIsDeleteOpen(false)}
-          // placement="right"
-          closeOnBlur={false}
-        >
-          <PopoverTrigger>
-            <div></div>
-          </PopoverTrigger>
-          <PopoverContent>
-            <PopoverArrow />
-            <PopoverCloseButton />
-            <PopoverBody textAlign={"left"}>
-              <Text mb={2}>
-                Are you sure you want to delete this folder,
-                <b> {folder.name}</b>?
-              </Text>
-              <Text color={"GrayText"} mb={5}>
-                This will NOT delete any files in the folder. The files will be
-                moved to the root folder.
-              </Text>
-              <Button
-                colorScheme="red"
-                size={"sm"}
-                onClick={() => {
-                  setIsDeleteOpen(false);
-                  onClose();
-                  foldersTable?.delete(folder.id);
-                  onRefreshFilesList && onRefreshFilesList();
-                }}
-              >
-                Yes, delete
-              </Button>
-            </PopoverBody>
-          </PopoverContent>
-        </Popover>
       )}
     </>
   );

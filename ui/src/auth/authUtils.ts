@@ -12,41 +12,8 @@ export function openCognitoPopup() {
   const popupWindow = window.open(
     popupUrl,
     "ComfyspaceLogin",
-    "width=800,height=600"
+    "width=800,height=600",
   );
 
   popupWindow?.focus();
-}
-
-export function pullAuthTokenCloseIfExist() {
-  if (window.location.href.includes(COMFYSPACE_AUTH_REDIRECT_URL + "#")) {
-    const paramsString = window.location.href.split("#")[1];
-    let params = new URLSearchParams(paramsString);
-
-    let accessToken = params.get("access_token");
-    window.opener.postMessage(
-      { comfyspace_authToken: accessToken },
-      "http://127.0.0.1:8188/"
-    );
-    window.close();
-  }
-}
-
-export function authTokenListener(event: MessageEvent) {
-  const { comfyspace_authToken } = event.data;
-  if (comfyspace_authToken) {
-    fetch(`${COGNITO_DOMAIN}/oauth2/userInfo`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${comfyspace_authToken}`,
-      },
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        console.log("User Info:", data);
-      })
-      .catch((error) => {
-        console.error("Error fetching user info:", error);
-      });
-  }
 }

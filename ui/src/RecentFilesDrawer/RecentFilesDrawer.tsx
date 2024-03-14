@@ -12,43 +12,36 @@ import {
   Box,
   Flex,
   Tooltip,
+  Switch,
 } from "@chakra-ui/react";
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useContext } from "react";
 import {
-  Workflow,
-  deleteFlow,
+  workflowsTable,
   isFolder,
-  listWorkflows,
-  listFolderContent,
-  tagsTable,
-  workspace,
   foldersTable,
 } from "../db-tables/WorkspaceDB";
 import {
   IconChevronDown,
-  IconChevronUp,
   IconFolderPlus,
   IconPlus,
-  IconX,
   IconFolder,
 } from "@tabler/icons-react";
-import { RecentFilesContext } from "../WorkspaceContext";
+import { RecentFilesContext, WorkspaceContext } from "../WorkspaceContext";
 import RecentFilesDrawerMenu from "./RecentFilesDrawerMenu";
-import { sortFileItem } from "../utils";
-import WorkflowListItem from "./WorkflowListItem";
+import { insertWorkflowToCanvas, sortFileItem } from "../utils";
 import MultipleSelectionOperation from "./MultipleSelectionOperation";
 import { ESortTypes, sortTypeLocalStorageKey } from "./types";
-// @ts-ignore
+// @ts-expect-error ComfyUI import
 import { app } from "/scripts/app.js";
-import { insertWorkflowToCanvas3 } from "./InsertWorkflowToCanvas";
-import FilesListFolderItem from "./FilesListFolderItem";
 import { useDebounce } from "../customHooks/useDebounce";
 import SearchInput from "../components/SearchInput";
 import { openWorkflowsFolder } from "../Api";
-import { Folder } from "../types/dbTypes";
-import ImportFileButton from "./ImportFileButton";
+import { Folder, Workflow } from "../types/dbTypes";
+import MyTagsRow from "./MyTagsRow";
+import ImportFlowsFileInput from "./ImportFlowsFileInput";
+import ItemsList from "./ItemsList";
+import { DRAWER_Z_INDEX } from "../const";
 
-const MAX_TAGS_TO_SHOW = 6;
 type Props = {
   onClose: () => void;
   onClickNewFlow: () => void;
@@ -60,9 +53,8 @@ export default function RecentFilesDrawer({ onClose, onClickNewFlow }: Props) {
   >([]);
   const aloneFlowsAndFoldersRef = useRef<Array<Folder | Workflow>>([]);
   const allFlowsRef = useRef<Array<Workflow>>([]);
-
+  const { loadWorkflowID, curFlowID } = useContext(WorkspaceContext);
   const [selectedTag, setSelectedTag] = useState<string>();
-  const [showAllTags, setShowAllTags] = useState(false);
   const [multipleState, setMultipleState] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [refreshFolderStamp, setRefreshFolderStamp] = useState(0);
@@ -70,17 +62,17 @@ export default function RecentFilesDrawer({ onClose, onClickNewFlow }: Props) {
   const debounceSearchValue = useDebounce(searchValue, 400);
   const draggingWorkflowID = useRef<string | null>(null);
   const [draggingFile, setDraggingFile] = useState<Workflow | Folder | null>(
-    null
+    null,
   );
   const sortTypeRef = useRef<ESortTypes>(
     (window.localStorage.getItem(sortTypeLocalStorageKey) as ESortTypes) ??
-      ESortTypes.RECENTLY_MODIFIED
+      ESortTypes.RECENTLY_MODIFIED,
   );
 
-  const loadLatestWorkflows = () => {
-    const all = listFolderContent();
-    aloneFlowsAndFoldersRef.current = all;
-    allFlowsRef.current = listWorkflows();
+  const loadLatestWorkflows = async () => {
+    aloneFlowsAndFoldersRef.current =
+      (await workflowsTable?.listFolderContent()) ?? [];
+    allFlowsRef.current = (await workflowsTable?.listAll()) ?? [];
     filterFlows();
     setRefreshFolderStamp(Date.now());
   };
@@ -106,7 +98,7 @@ export default function RecentFilesDrawer({ onClose, onClickNewFlow }: Props) {
       setCurrentRenderingData(sortFileItem(filterResult, sortTypeRef.current));
     } else {
       setCurrentRenderingData(
-        sortFileItem(aloneFlowsAndFoldersRef.current, sortTypeRef.current)
+        sortFileItem(aloneFlowsAndFoldersRef.current, sortTypeRef.current),
       );
     }
   };
@@ -123,22 +115,25 @@ export default function RecentFilesDrawer({ onClose, onClickNewFlow }: Props) {
   }, [debounceSearchValue, selectedTag]);
 
   const onDelete = useCallback(
-    (id: string) => {
-      deleteFlow(id);
-      loadLatestWorkflows();
+    async (id: string) => {
+      await workflowsTable?.deleteFlow(id);
+      if (workflowsTable?.curWorkflow?.id === id) {
+        await loadWorkflowID?.(null);
+      }
+      await loadLatestWorkflows();
     },
-    [selectedTag, debounceSearchValue]
+    [selectedTag, debounceSearchValue],
   );
 
   useEffect(() => {
     loadLatestWorkflows();
-    const handleDrop = (e: any) => {
-      workspace &&
-        draggingWorkflowID.current &&
-        insertWorkflowToCanvas3(workspace[draggingWorkflowID.current].json, [
-          e.canvasX,
-          e.canvasY,
-        ]);
+    const handleDrop = async (e: { canvasX: number; canvasY: number }) => {
+      if (draggingWorkflowID.current) {
+        const flow = await workflowsTable?.get(draggingWorkflowID.current);
+        flow &&
+          flow.json &&
+          insertWorkflowToCanvas(flow.json, [e.canvasX, e.canvasY]);
+      }
     };
 
     app.canvasEl.addEventListener("drop", handleDrop);
@@ -165,13 +160,19 @@ export default function RecentFilesDrawer({ onClose, onClickNewFlow }: Props) {
   const batchOperationCallback = (type: string, value: unknown) => {
     switch (type) {
       case "batchDelete":
+        curFlowID &&
+          workflowsTable?.get(curFlowID).then((res) => {
+            if (!res) {
+              loadWorkflowID?.(null);
+            }
+          });
         loadLatestWorkflows();
         setMultipleState(false);
         setSelectedKeys([]);
         return;
       case "selectAll":
         setSelectedKeys(
-          value ? allFlowsRef.current.map((flow) => flow.id) : []
+          value ? allFlowsRef.current.map((flow) => flow.id) : [],
         );
         return;
     }
@@ -188,7 +189,7 @@ export default function RecentFilesDrawer({ onClose, onClickNewFlow }: Props) {
     setSearchValue(newValue);
   };
 
-  const DRAWER_WIDTH = 440;
+  const DRAWER_WIDTH = 450;
   return (
     <RecentFilesContext.Provider
       value={{
@@ -207,28 +208,28 @@ export default function RecentFilesDrawer({ onClose, onClickNewFlow }: Props) {
         <Card
           width={DRAWER_WIDTH}
           height={"100vh"}
-          pl={4}
-          pr={5}
+          pl={2}
+          pr={2}
           pt={4}
           gap={4}
           position={"absolute"}
           top={0}
           left={0}
           shadow={"xl"}
-          zIndex={1000}
+          zIndex={DRAWER_Z_INDEX}
           // boxShadow={"rgba(200, 200, 200, 0.4) 1px 4px 8px 1px"}
         >
           <Flex alignItems={"center"} justifyContent={"space-between"}>
             <HStack gap={4}>
               <HStack gap={2}>
                 <Text fontSize={19} fontWeight={600}>
-                  ☕️Workspace
+                  🦄Workspace
                 </Text>
                 {/* <Tooltip label="Login to share and sync your workflows to cloud">
                   <Link onClick={openCognitoPopup}>Login</Link>
                 </Tooltip> */}
               </HStack>
-              <ImportFileButton />
+              <ImportFlowsFileInput />
               <Tooltip label="Open workspace save directory">
                 <IconButton
                   aria-label="Open workspace save directory"
@@ -256,45 +257,10 @@ export default function RecentFilesDrawer({ onClose, onClickNewFlow }: Props) {
             </HStack>
           </Flex>
           <Flex direction="column" h="calc(100% - 64px)">
-            <HStack spacing={2} wrap={"wrap"} mb={0}>
-              {selectedTag != null && (
-                <IconButton
-                  aria-label="Close"
-                  size={"sm"}
-                  icon={<IconX />}
-                  onClick={() => {
-                    setSelectedTag(undefined);
-                  }}
-                />
-              )}
-              {tagsTable
-                ?.listAll()
-                .slice(0, showAllTags ? undefined : MAX_TAGS_TO_SHOW)
-                .map((tag) => (
-                  <Button
-                    variant="solid"
-                    width={"auto"}
-                    flexShrink={0}
-                    size={"sm"}
-                    borderRadius={15}
-                    py={4}
-                    onClick={() => {
-                      setSelectedTag(tag.name);
-                    }}
-                    isActive={selectedTag === tag.name}
-                  >
-                    {tag.name}
-                  </Button>
-                ))}
-              {(tagsTable?.listAll().length ?? 0) > MAX_TAGS_TO_SHOW && (
-                <IconButton
-                  aria-label="Show-all-tags"
-                  size={"sm"}
-                  icon={showAllTags ? <IconChevronUp /> : <IconChevronDown />}
-                  onClick={() => setShowAllTags(!showAllTags)}
-                />
-              )}
-            </HStack>
+            <MyTagsRow
+              selectedTag={selectedTag}
+              setSelectedTag={setSelectedTag}
+            />
             <HStack mb={2} mt={2} p={0} justifyContent="space-between">
               <HStack>
                 {allFlowsRef.current.length > 0 ? (
@@ -319,8 +285,8 @@ export default function RecentFilesDrawer({ onClose, onClickNewFlow }: Props) {
                       size={"sm"}
                       variant={"outline"}
                       icon={<IconFolderPlus size={21} />}
-                      onClick={() => {
-                        foldersTable?.create({
+                      onClick={async () => {
+                        await foldersTable?.create({
                           name: "New Folder",
                         });
                         loadLatestWorkflows();
@@ -363,12 +329,7 @@ export default function RecentFilesDrawer({ onClose, onClickNewFlow }: Props) {
               onUpdateSearchValue={onUpdateSearchValue}
             />
             <Flex overflowY={"auto"} overflowX={"hidden"} direction="column">
-              {currentRenderingData.map((n) => {
-                if (isFolder(n)) {
-                  return <FilesListFolderItem folder={n} key={n.id} />;
-                }
-                return <WorkflowListItem key={n.id} workflow={n} />;
-              })}
+              <ItemsList items={currentRenderingData} />
             </Flex>
           </Flex>
         </Card>

@@ -1,4 +1,4 @@
-import { Button, HStack, IconButton, Text, Tooltip } from "@chakra-ui/react";
+import { Button, HStack, IconButton, Tooltip } from "@chakra-ui/react";
 import Draggable from "../components/Draggable";
 import {
   IconDeviceFloppy,
@@ -7,43 +7,66 @@ import {
   IconPhoto,
   IconPlus,
   IconTriangleInvertedFilled,
+  IconLock,
 } from "@tabler/icons-react";
 import DropdownTitle from "../components/DropdownTitle";
-import { Suspense, useContext, useEffect, useState } from "react";
+import { useCallback, useContext, useEffect, useState } from "react";
 import EditFlowName from "../components/EditFlowName";
 import { WorkspaceContext } from "../WorkspaceContext";
 import { PanelPosition } from "../types/dbTypes";
-import React from "react";
-const ModelManagerTopbar = React.lazy(
-  () => import("../model-manager/topbar/ModelManagerTopbar")
-);
+import "./Topbar.css";
+import { SharedTopbarButton } from "../share/SharedTopbarButton";
+import VersionNameTopbar from "./VersionNameTopbar";
+import { userSettingsTable, workflowsTable } from "../db-tables/WorkspaceDB";
+
 interface Props {
-  positionStyle: PanelPosition;
-  updatePanelPosition: (
-    position?: PanelPosition,
-    needUpdateDB?: boolean
-  ) => void;
   curFlowName: string | null;
   setCurFlowName: (newName: string) => void;
 }
-export function Topbar({
-  updatePanelPosition,
-  positionStyle,
-  curFlowName,
-  setCurFlowName,
-}: Props) {
-  const [isHovered, setIsHovered] = useState(false);
+export function Topbar({ curFlowName, setCurFlowName }: Props) {
   const { isDirty, loadNewWorkflow, saveCurWorkflow, setRoute, curFlowID } =
     useContext(WorkspaceContext);
-  const [loadChild, setLoadChild] = useState(false);
+  const [positionStyle, setPositionStyle] = useState<PanelPosition>();
+  const updatePanelPosition: (
+    position?: PanelPosition,
+    needUpdateDB?: boolean,
+  ) => void = useCallback(
+    (position?: PanelPosition, needUpdateDB: boolean = false) => {
+      const { top: curTop = 0, left: curLeft = 0 } = positionStyle || {};
+      let { top = 0, left = 0 } = position ?? {};
+      top += curTop;
+      left += curLeft;
+      const clientWidth = document.documentElement.clientWidth;
+      const clientHeight = document.documentElement.clientHeight;
+      const panelElement = document.getElementById("workspaceManagerPanel");
+      const offsetWidth = panelElement?.offsetWidth || 392;
+
+      if (top + 36 > clientHeight) top = clientHeight - 36;
+      if (left + offsetWidth >= clientWidth) left = clientWidth - offsetWidth;
+
+      setPositionStyle({ top: Math.max(0, top), left: Math.max(0, left) });
+
+      needUpdateDB &&
+        userSettingsTable?.upsert({
+          topBarStyle: { top, left },
+        });
+    },
+    [positionStyle],
+  );
   useEffect(() => {
-    setLoadChild(true);
+    userSettingsTable?.getSetting("topBarStyle").then((res) => {
+      updatePanelPosition(res, false);
+    });
   }, []);
+  if (!positionStyle) {
+    return null;
+  }
   return (
     <Draggable
       onDragEnd={(position: { x: number; y: number }) => {
         updatePanelPosition({ top: position.y, left: position.x }, true);
       }}
+      dragIconId="dragPanelIcon"
     >
       <HStack
         style={{
@@ -56,8 +79,7 @@ export function Topbar({
         gap={2}
         draggable={false}
         id="workspaceManagerPanel"
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        className="workspaceManagerPanel"
       >
         <Button
           size={"sm"}
@@ -70,21 +92,21 @@ export function Topbar({
             <IconTriangleInvertedFilled size={8} />
           </HStack>
         </Button>
-        <Button
-          size={"sm"}
-          variant={"outline"}
-          colorScheme="teal"
-          aria-label="new workflow"
-          onClick={() => loadNewWorkflow()}
-          px={2}
-        >
-          <HStack gap={1}>
-            <IconPlus size={16} color={"white"} />
-            <Text color={"white"} fontSize={"sm"}>
-              New
-            </Text>
-          </HStack>
-        </Button>
+        <Tooltip label="New workflow">
+          <Button
+            size={"sm"}
+            variant={"outline"}
+            colorScheme="teal"
+            aria-label="new workflow"
+            onClick={() => loadNewWorkflow()}
+            px={2}
+            py={2}
+          >
+            <HStack gap={0}>
+              <IconPlus size={16} color={"white"} />
+            </HStack>
+          </Button>
+        </Tooltip>
         <EditFlowName
           isDirty={isDirty}
           displayName={curFlowName ?? ""}
@@ -95,44 +117,47 @@ export function Topbar({
             });
           }}
         />
+        {workflowsTable?.curWorkflow?.saveLock && (
+          <IconLock color="#FFF" size={20} />
+        )}
         {curFlowID && (
-          <HStack gap={"1px"}>
+          <HStack gap={"4px"}>
             <Tooltip label="Open gallery">
               <IconButton
                 onClick={() => setRoute("gallery")}
-                icon={<IconPhoto size={20} color="white" />}
+                icon={<IconPhoto size={22} color="white" />}
                 size={"sm"}
                 aria-label="open gallery"
                 variant={"ghost"}
               />
             </Tooltip>
-            <DropdownTitle onClick={() => setIsHovered(false)} />
+            <DropdownTitle />
           </HStack>
         )}
-        {curFlowID && isDirty && (
+        {curFlowID && isDirty ? (
           <Tooltip label="Save workflow">
             <IconButton
+              // style={{ width: 26 }}
               onClick={saveCurWorkflow}
-              icon={<IconDeviceFloppy size={22} color="white" />}
+              icon={<IconDeviceFloppy size={23} color="white" />}
               size={"xs"}
+              paddingY={4}
               aria-label="save workspace"
               variant={"ghost"}
             />
           </Tooltip>
+        ) : (
+          <div style={{ width: 1 }} />
         )}
-        {/* {loadChild && (
-          <Suspense>
-            <ModelManagerTopbar />
-          </Suspense>
-        )} */}
-        {isHovered && (
-          <IconGripVertical
-            id="dragPanelIcon"
-            cursor="move"
-            size={15}
-            color="#FFF"
-          />
-        )}
+        <SharedTopbarButton />
+        <VersionNameTopbar />
+        <IconGripVertical
+          id="dragPanelIcon"
+          className="dragPanelIcon"
+          cursor="move"
+          size={15}
+          color="#FFF"
+        />
       </HStack>
     </Draggable>
   );

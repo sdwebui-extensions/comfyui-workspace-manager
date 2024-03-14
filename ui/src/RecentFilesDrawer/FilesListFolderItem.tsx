@@ -1,57 +1,94 @@
 import { HStack, useColorMode, Text, Stack } from "@chakra-ui/react";
 import {
-  Workflow,
   foldersTable,
   isFolder,
-  listFolderContent,
-  updateFlow,
+  workflowsTable,
 } from "../db-tables/WorkspaceDB";
-import { useState, memo, useContext, useEffect, MouseEvent } from "react";
+import {
+  useState,
+  memo,
+  useContext,
+  useEffect,
+  MouseEvent,
+  DragEvent,
+} from "react";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { RecentFilesContext } from "../WorkspaceContext";
-import WorkflowListItem from "./WorkflowListItem";
 import FilesListFolderItemRightClickMenu from "./FilesListFolderItemRightClickMenu";
 import { ESortTypes, sortTypeLocalStorageKey } from "./types";
-import { Folder } from "../types/dbTypes";
+import { Folder, Workflow } from "../types/dbTypes";
+import ItemsList from "./ItemsList";
 
 type Props = {
   folder: Folder;
 };
 export default memo(function FilesListFolderItem({ folder }: Props) {
   const [isActive, setIsActive] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(folder.isCollapse ?? false);
-  const [children, setChildren] = useState<Array<Folder | Workflow>>(() =>
-    listFolderContent(folder.id)
-  );
+  const [isCollapsed, setIsCollapsed] = useState(folder.isCollapse ?? true);
+  const [children, setChildren] = useState<Array<Folder | Workflow>>([]);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const { colorMode } = useColorMode();
-  const { draggingFile, refreshFolderStamp, onRefreshFilesList } =
-    useContext(RecentFilesContext);
+  const {
+    draggingFile,
+    setDraggingFile,
+    refreshFolderStamp,
+    onRefreshFilesList,
+  } = useContext(RecentFilesContext);
   const activeStyle =
     colorMode === "light"
       ? { backgroundColor: "#E2E8F0" }
       : { backgroundColor: "#4A5568" };
+
   useEffect(() => {
-    setChildren(
-      listFolderContent(
+    if (isCollapsed) return;
+    workflowsTable
+      ?.listFolderContent(
         folder.id,
-        window.localStorage.getItem(sortTypeLocalStorageKey) as ESortTypes
+        window.localStorage.getItem(sortTypeLocalStorageKey) as ESortTypes,
       )
-    );
-  }, [folder.id, refreshFolderStamp]);
+      .then((child) => {
+        setChildren(child);
+      });
+  }, [folder.id, refreshFolderStamp, isCollapsed]);
+
   const handleContextMenu = (event: MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     setMenuPosition({ x: event.clientX, y: event.clientY });
     setIsMenuOpen(true);
   };
+  const handleDrop = async (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!draggingFile) return setIsActive(false);
+    if (isFolder(draggingFile)) {
+      if (draggingFile.id === folder.id) return setIsActive(false);
+      await foldersTable?.update(draggingFile.id, {
+        parentFolderID: folder.id,
+      });
+    } else if (!isFolder(draggingFile)) {
+      await workflowsTable?.updateFolder(draggingFile.id, {
+        parentFolderID: folder.id,
+      });
+    }
+    await onRefreshFilesList?.();
+    setIsActive(false);
+  };
   useEffect(() => {
-    if (folder.isCollapse === isCollapsed) return;
-    foldersTable?.update({
-      id: folder.id,
+    if (!!folder.isCollapse === isCollapsed) return;
+    foldersTable?.update(folder.id, {
       isCollapse: isCollapsed,
     });
   }, [isCollapsed]);
+  useEffect(() => {
+    const cur = workflowsTable?.curWorkflow;
+    const curWorkflowPath = cur?.parentFolderID + "/";
+    const folderPath = folder.id + "/";
+    const childreHasCurworkflow = curWorkflowPath.startsWith(folderPath);
+    if (childreHasCurworkflow) {
+      setIsCollapsed(false);
+    }
+  }, []);
   return (
     <Stack>
       <HStack
@@ -62,24 +99,22 @@ export default memo(function FilesListFolderItem({ folder }: Props) {
           setIsCollapsed(!isCollapsed);
         }}
         onContextMenu={handleContextMenu}
+        draggable="true"
         onDragOver={(e) => {
           e.preventDefault();
+          e.stopPropagation();
           setIsActive(true);
         }}
-        onDragLeave={() => {
+        onDragLeave={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
           setIsActive(false);
         }}
-        onDrop={() => {
-          if (draggingFile && !isFolder(draggingFile)) {
-            updateFlow(draggingFile.id, {
-              parentFolderID: folder.id,
-            });
-            onRefreshFilesList && onRefreshFilesList();
-          }
-          setIsActive(false);
-        }}
+        onDragStart={() => setDraggingFile?.(folder)}
+        onDrop={handleDrop}
         _hover={activeStyle}
         style={isActive || isMenuOpen ? activeStyle : undefined}
+        className="droppable"
       >
         <HStack gap={1}>
           {isCollapsed ? (
@@ -97,23 +132,16 @@ export default memo(function FilesListFolderItem({ folder }: Props) {
           </svg>
         </HStack>
         <Text>{folder.name}</Text>
-
-        <FilesListFolderItemRightClickMenu
-          isopen={isMenuOpen}
-          menuPosition={menuPosition}
-          onClose={() => setIsMenuOpen(false)}
-          folder={folder}
-        />
       </HStack>
+      <FilesListFolderItemRightClickMenu
+        isopen={isMenuOpen}
+        menuPosition={menuPosition}
+        onClose={() => setIsMenuOpen(false)}
+        folder={folder}
+      />
       {!isCollapsed && (
         <Stack ml={4} gap={0}>
-          {children.map((file) => {
-            if (isFolder(file)) {
-              return <FilesListFolderItem folder={file} />;
-            } else {
-              return <WorkflowListItem workflow={file} />;
-            }
-          })}
+          <ItemsList items={children} />
         </Stack>
       )}
     </Stack>

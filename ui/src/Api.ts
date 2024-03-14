@@ -1,6 +1,8 @@
 import { Table } from "./db-tables/WorkspaceDB";
+import type { ModelsListRespItem } from "./model-manager/types";
 
 export async function getDB(table: Table): Promise<string | undefined> {
+  console.warn("[workspace deprecated] getDB is deprecated", table);
   try {
     const response = await fetch(`/workspace/get_db?table=${table}`);
     if (!response.ok) {
@@ -15,8 +17,6 @@ export async function getDB(table: Table): Promise<string | undefined> {
 }
 
 export async function saveDB(table: Table, jsonData: string) {
-  // const tableBackupFile = table + "/" + Date.now() + ".json";
-  // saveBackup(tableBackupFile, jsonData);
   try {
     const response = await fetch("/workspace/save_db", {
       method: "POST",
@@ -71,25 +71,6 @@ export async function deleteFile(file_path: string, deleteEmptyFolder = false) {
   }
 }
 
-export async function saveBackup(file_path: string, jsonData: string) {
-  try {
-    const response = await fetch("/workspace/save_backup", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        file_path: file_path,
-        json_str: jsonData,
-      }),
-    });
-    const result = await response.text();
-    return result;
-  } catch (error) {
-    console.error("Error saving workspace backup:", error);
-  }
-}
-
 export async function listBackup(dir: string) {
   try {
     const response = await fetch("/workspace/list_backup", {
@@ -116,7 +97,7 @@ export async function getSystemDir(root?: string) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        absolute_dir: root,
+        absolute_dir: root ?? "",
       }),
     });
     const result = await response.json();
@@ -141,21 +122,103 @@ export async function openWorkflowsFolder() {
   }
 }
 
-export async function scanLocalNewFiles(path: string, existFlowIds: string[]) {
+export async function fetchMyWorkflowsDir() {
+  const resp = await fetch("/workspace/get_my_workflows_dir");
+  const res = (await resp.json()) as {
+    path?: string;
+    error?: string;
+    os: string;
+  };
+  if (res.error) {
+    alert(`Failed to fetch my workflows path: ${res.error}`);
+  }
+  return res.path;
+}
+
+export async function getAllModelsList() {
   try {
-    const response = await fetch("/workspace/scan_local_new_files", {
+    const response = await fetch("/model_manager/get_model_list", {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+    const result = await response.json();
+    return result as Array<ModelsListRespItem & { date: number }>;
+  } catch (error) {
+    console.error("Error get all models list:", error);
+  }
+}
+
+export async function getAllFoldersList() {
+  try {
+    const response = await fetch("/model_manager/get_folder_list", {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+    const result = await response.json();
+    return result as Record<string, string[]>;
+  } catch (error) {
+    console.error("Error get all models list:", error);
+  }
+}
+
+export async function deleteLocalDiskFolder(folderPath: string) {
+  try {
+    const response = await fetch("/workspace/delete_folder", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        path,
-        existFlowIds
+        folder_path: folderPath,
+      }),
+    });
+    const result = await response.text();
+    return result;
+  } catch (error) {
+    console.error("Error move file:", error);
+  }
+}
+
+export async function cancelDownload(savePath: string) {
+  try {
+    const response = await fetch("/model_manager/cancel_installation", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        save_path: savePath,
+      }),
+    });
+    const result = await response.text();
+    return result;
+  } catch (error) {
+    console.error("Error move file:", error);
+  }
+}
+
+export async function copyFlowsToNewDirectory(
+  sourceDir: string,
+  dstDir: string,
+) {
+  try {
+    const response = await fetch("/workspace/copy_json_files", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        src: sourceDir,
+        dst: dstDir,
       }),
     });
     const result = await response.json();
     return result;
   } catch (error) {
-    console.error("Error scan local new files:", error);
+    console.error("Error copy flows to new directory:", error);
   }
 }

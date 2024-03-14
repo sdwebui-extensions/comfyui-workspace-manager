@@ -1,7 +1,7 @@
 import React, { Suspense } from "react";
 import ReactDOM from "react-dom/client";
 import { ColorModeScript } from "@chakra-ui/react";
-import { ChakraProvider } from "@chakra-ui/react";
+import { ChakraProvider, extendTheme } from "@chakra-ui/react";
 import { AlertDialogProvider } from "./components/AlertDialogProvider.tsx";
 import CSSReset from "./MyCSSReset.tsx";
 
@@ -10,21 +10,46 @@ document.body.append(topbar);
 const App = React.lazy(() =>
   import("./App.tsx").then(({ default: App }) => ({
     default: App,
-  }))
+  })),
 );
+
+/**
+ * Since the z-index of other plug-ins is set to 1111111,
+ * part of the content of our Drawer component is covered,
+ * so the z-index is adjusted uniformly and multiplied by 10000 based on the default value.
+ */
+const zIndices = {
+  hide: -1,
+  auto: "auto",
+  base: 0,
+  docked: 10,
+  dropdown: 10000000,
+  sticky: 11000000,
+  banner: 12000000,
+  overlay: 13000000,
+  modal: 14000000,
+  popover: 15000000,
+  skipLink: 16000000,
+  toast: 17000000,
+  tooltip: 18000000,
+};
+
+const theme = extendTheme({
+  zIndices,
+});
 
 ReactDOM.createRoot(topbar).render(
   <React.StrictMode>
-    <ChakraProvider resetCSS={false} disableGlobalStyle={true}>
+    <ChakraProvider resetCSS={false} disableGlobalStyle={true} theme={theme}>
       <CSSReset scope=".workspace_manager" />
-      <ColorModeScript />
+      <ColorModeScript initialColorMode="dark" />
       <AlertDialogProvider>
         <Suspense>
           <App />
         </Suspense>
       </AlertDialogProvider>
     </ChakraProvider>
-  </React.StrictMode>
+  </React.StrictMode>,
 );
 
 // hacky fix for chakra add extra className (chakra-ui-light) into body
@@ -35,10 +60,10 @@ const observerConfig = { attributes: true, attributeFilter: ["class"] };
 // Callback function to execute when mutations are observed
 const callback = function (
   mutationsList: MutationRecord[],
-  _observer: MutationObserver
+  _observer: MutationObserver,
 ) {
   // remove color-scheme property from <html> element, this made the checkboxes dark
-  let htmlElement = document.documentElement;
+  const htmlElement = document.documentElement;
   if (htmlElement.style.colorScheme === "dark") {
     // Remove the color-scheme property
     htmlElement.style.removeProperty("color-scheme");
