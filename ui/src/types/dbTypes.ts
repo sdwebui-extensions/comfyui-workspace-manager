@@ -1,8 +1,10 @@
 import type { MODEL_TYPE } from "../model-manager/install-models/util/modelTypes";
+import { TopFieldType } from "../gallery/components/MetaBox/MetadataForm.tsx";
 
 export interface SortableItem {
   name: string;
   updateTime: number;
+  lastOpenedTime?: number;
 }
 
 export interface Workflow extends SortableItem {
@@ -11,15 +13,16 @@ export interface Workflow extends SortableItem {
   lastSavedJson?: string; // TODO will be deprecated
   name: string;
   createTime: number;
-  filePath?: string;
+  filePath?: string; // TODO will be deprecated
   privacy?: WorkflowPrivacy;
   tags?: string[];
   parentFolderID?: string | null; //TODO remove undefined, use null only
-  mediaIDs?: string[]; // TODO will be deprecated
   coverMediaPath?: string;
   cloudID?: string; // TODO will be deprecated
   cloudOrigin?: string;
   saveLock?: boolean;
+  latestImage?: string;
+  topFieldsConfig?: TopFieldType[];
 }
 
 export interface TableBaseModel {
@@ -45,11 +48,12 @@ export type LocalCache = {
 export type Model = {
   id: string;
   fileName: string;
-  modelName: string;
   fileFolder: string;
-  fileHash: string;
-  civitModelID: string;
-  civitModelVersionID: string;
+  fileHash: string | null; // files are not guaranteed to finish hashing
+  modelName: string | null;
+  civitModelID?: string;
+  downloadUrl?: string;
+  civitModelVersionID?: string;
   imageUrl?: string | null;
 };
 
@@ -72,21 +76,31 @@ export type WorkflowVersion = {
 export enum EShortcutKeys {
   SAVE = "save",
   SAVE_AS = "saveAs",
+  openSpotlightSearch = "openSpotlightSearch",
+}
+
+export enum EOtherKeys {
+  ArrowUp = "ArrowUp",
+  ArrowDown = "ArrowDown",
+  Enter = "Enter",
 }
 
 export type UserSettings = {
   id: string;
   myWorkflowsDir: string;
   topBarStyle: PanelPosition;
-  modelManagerTopBarStyle: ModelManagerPosition;
   shortcuts: Record<EShortcutKeys, string>;
   autoSave?: boolean;
+  autoSaveDuration?: number; //every X seconds to save
   twoWaySync?: boolean;
   foldersOnTop?: boolean;
   showNsfwModelThumbnail?: boolean;
   cloudHost: string;
   overwriteCurWorkflowWhenDroppingFileToCanvas: boolean;
   defaultFolders: Record<MODEL_TYPE, string>;
+  maximumChangelogNumber: number;
+  hideCoverImage: boolean;
+  disableUnsavedWarning: boolean;
 };
 
 export interface PanelPosition {
@@ -114,6 +128,7 @@ export type Changelog = {
 export type Media = {
   id: string;
   workflowID: string;
+  workflowJSON?: string;
   createTime: number;
   localPath: string;
   format: string;
@@ -135,4 +150,17 @@ export enum EFlowOperationType {
 
 export type WorkflowPrivacy = "PUBLIC" | "PRIVATE" | "UNLISTED";
 
+export enum EWorkflowPrivacy {
+  PRIVATE = "PRIVATE",
+  PUBLIC = "PUBLIC",
+  UNLISTED = "UNLISTED",
+}
+
 export const WORKSPACE_INDEXDB_NAME = "comfyui_workspace_db";
+
+export type RecentlyOpenedFile = {
+  id: string;
+  name: string;
+  type: "workflow" | "model";
+  updateTime: number;
+};

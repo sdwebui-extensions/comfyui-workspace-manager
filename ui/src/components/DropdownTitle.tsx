@@ -43,9 +43,11 @@ import { Workflow } from "../types/dbTypes";
 import CreateVersionDialog from "./CreateVersionDialog";
 import HoverMenu from "./HoverMenu";
 const ShareDialog = lazy(() => import("../share/ShareDialog"));
-// @ts-ignore
-import { app } from "/scripts/app.js";
-import JsonDiffCompareModal from "./JsonDiffCompareModal";
+import { TOPBAR_BUTTON_HEIGHT } from "../const";
+import DownloadSpaceJsonDialog from "../spacejson/DownloadSpaceJsonDialog";
+import { downloadJsonFile } from "../utils/downloadJsonFile";
+import { SharedTopbarButton } from "../share/SharedTopbarButton";
+import { app } from "../utils/comfyapp";
 
 export default function DropdownTitle() {
   const {
@@ -65,7 +67,6 @@ export default function DropdownTitle() {
     save: "",
     saveAs: "",
   });
-  const [isShareOpen, setIsShareOpen] = useState(false);
 
   useEffect(() => {
     if (curFlowID) {
@@ -93,7 +94,6 @@ export default function DropdownTitle() {
     const graph = JSON.stringify(app.graph.serialize());
     const flow = await workflowsTable?.createFlow({
       json: graph,
-      lastSavedJson: graph,
       name: newFlowName,
       parentFolderID: workflow?.parentFolderID,
     });
@@ -107,23 +107,15 @@ export default function DropdownTitle() {
   };
 
   const handleDownload = useCallback(async () => {
-    const json_data = curFlowID ? await workflowsTable?.get(curFlowID) : null;
-
-    if (!json_data) {
-      alert("Workspace does not exist");
+    const curWorkflow = workflowsTable?.curWorkflow;
+    if (!curWorkflow) {
+      alert("No current workflow!");
       return;
     }
+    const graph = app.graph.serialize();
+    const json = JSON.stringify(graph, null, 2);
 
-    const blob = new Blob([json_data.json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${json_data.name}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadJsonFile(json, curWorkflow.name);
   }, [curFlowID]);
 
   return (
@@ -133,11 +125,10 @@ export default function DropdownTitle() {
           <DarkMode>
             <Button
               px={1}
-              height={"29px"}
+              height={TOPBAR_BUTTON_HEIGHT + "px"}
               aria-label="menu"
               size={"sm"}
-              // backgroundColor={"gray.700"}
-              backgroundColor={"teal.600"}
+              backgroundColor={"#434554"}
             >
               File
               <IconChevronDown size={20} />
@@ -148,22 +139,24 @@ export default function DropdownTitle() {
           <Menu isOpen={true}>
             <MenuList minWidth={150} zIndex={1000}>
               <MenuItem
-                onClick={saveCurWorkflow}
+                onClick={() => saveCurWorkflow()}
                 icon={<IconDeviceFloppy size={20} />}
                 iconSpacing={1}
                 command={saveShortcut.save}
               >
                 Save
               </MenuItem>
-              <Tooltip label="Revert workflow to your last saved version. You will lose all changes made since your last save.">
-                <MenuItem
-                  onClick={discardUnsavedChanges}
-                  icon={<IconArrowBackUpDouble size={20} />}
-                  iconSpacing={1}
-                >
-                  Discard unsaved changes
-                </MenuItem>
-              </Tooltip>
+              {!userSettingsTable?.settings?.autoSave && (
+                <Tooltip label="Revert workflow to your last saved version. You will lose all changes made since your last save.">
+                  <MenuItem
+                    onClick={discardUnsavedChanges}
+                    icon={<IconArrowBackUpDouble size={20} />}
+                    iconSpacing={1}
+                  >
+                    Discard unsaved changes
+                  </MenuItem>
+                </Tooltip>
+              )}
               <MenuItem
                 onClick={handleDownload}
                 icon={<IconDownload size={20} />}
@@ -193,27 +186,33 @@ export default function DropdownTitle() {
               >
                 Versions History
               </MenuItem>
+              {/* <MenuItem
+                onClick={() => setRoute("downloadSpaceJson")}
+                icon={<IconDownload size={20} />}
+                iconSpacing={1}
+              >
+                Save runnable workflow🧪
+              </MenuItem> */}
               <MenuItem
-                onClick={() => setIsShareOpen(true)}
+                onClick={() => setRoute("share")}
                 icon={<IconShare2 size={20} />}
                 iconSpacing={1}
                 alignItems={"center"}
               >
                 <HStack>
-                  <p>Share</p> <Tag size={"sm"}>🧪🧪beta</Tag>
+                  <p>Share</p> <Tag size={"sm"}>🧪beta</Tag>
+                  <SharedTopbarButton />
                 </HStack>
               </MenuItem>
             </MenuList>
           </Menu>
         }
       />
-      {isShareOpen && <ShareDialog onClose={() => setIsShareOpen(false)} />}
+      {route === "share" && <ShareDialog onClose={() => setRoute("root")} />}
       {route == "versionHistory" && (
         <VersionHistoryDrawer onClose={() => setRoute("root")} />
       )}
-
-      <JsonDiffCompareModal />
-
+      {route == "downloadSpaceJson" && <DownloadSpaceJsonDialog />}
       {route === "saveAsModal" && (
         <Modal isOpen={true} onClose={handleOnCloseModal}>
           <ModalOverlay />

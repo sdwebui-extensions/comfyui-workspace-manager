@@ -43,9 +43,12 @@ def read_table(table):
         else:
             return None
 
-    with open(file_name, 'r') as file:
-        data = json.load(file)
-    return data
+    try:
+        with open(file_name, 'r', encoding='utf-8') as file:
+            data = json.load(file)
+            return data
+    except json.JSONDecodeError as e:
+        return None
 
 
 @server.PromptServer.instance.routes.get("/workspace/get_db")
@@ -64,6 +67,12 @@ def get_my_workflows_dir():
             curDir = records[DEFAULT_USER]['myWorkflowsDir']  
         elif 'myWorkflowsDir' in records:  
             curDir = records['myWorkflowsDir']
-        if os.path.exists(curDir):
+        
+        # this is to be compatible of a bug that a dict is stored in userSettings.myWorkflowsDir
+        # should not be needed once all users refresh their settings
+        if not isinstance(curDir, str):
+            curDir = curDir.get('path', None)
+
+        if curDir and os.path.exists(curDir):
             return curDir
     return os.path.join(comfy_path, 'my_workflows')

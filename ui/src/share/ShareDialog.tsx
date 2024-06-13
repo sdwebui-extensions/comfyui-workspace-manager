@@ -13,14 +13,15 @@ import {
   Radio,
   RadioGroup,
   Stack,
+  Switch,
   Tag,
   Text,
   useToast,
 } from "@chakra-ui/react";
-import { Workflow, WorkflowPrivacy, WorkflowVersion } from "../types/dbTypes";
+import { WorkflowPrivacy, WorkflowVersion } from "../types/dbTypes";
 import { useEffect, useRef, useState } from "react";
 import CustomSelector from "../components/CustomSelector";
-import { IconCloud, IconCopy, IconExternalLink } from "@tabler/icons-react";
+import { IconCopy, IconExternalLink } from "@tabler/icons-react";
 import {
   userSettingsTable,
   workflowVersionsTable,
@@ -28,8 +29,6 @@ import {
 } from "../db-tables/WorkspaceDB";
 // @ts-ignore
 import { api } from "/scripts/api.js";
-// @ts-ignore
-import { app } from "/scripts/app.js";
 import {
   PrivacyLabel,
   fetchCloudWorkflowPrivacy,
@@ -39,29 +38,33 @@ import {
 } from "./shareUtils";
 
 import ShareDialogWorkflowVersionRadio from "./ShareDialogWorkflowVersionRadio";
+import ResourceDepsForm from "../spacejson/ResourceDepsForm";
+import { app } from "../utils/comfyapp";
+import { useStateRef } from "../customHooks/useStateRef";
 
 interface Props {
   onClose: () => void;
 }
 
 export default function ShareDialog({ onClose }: Props) {
-  const [versionName, setVersionName] = useState(
-    "version " + getCurDateString(),
-  );
+  const [versionName, setVersionName] = useState("v" + getCurDateString());
   const [localVersions, setLocalVersions] = useState<WorkflowVersion[]>([]);
   const [loading, setLoading] = useState(false);
-  const [cloudHost, setCloudHost] = useState("");
-  const [privacy, setPrivacy] = useState<WorkflowPrivacy>("PRIVATE");
+  const cloudHost = userSettingsTable?.settings?.cloudHost;
+  const [privacy, setPrivacy, privacyRef] =
+    useStateRef<WorkflowPrivacy>("PRIVATE");
   const [selectedVersion, setSelectedVersion] = useState<
     string | "new_version"
   >("new_version");
   const cloudHostRef = useRef("");
-  const [workflow, setWorkflow] = useState<Workflow>();
+  const workflow = workflowsTable?.curWorkflow;
   const toast = useToast();
+  const formRef = useRef<HTMLFormElement>(null);
+  const [enableDeps, setEnableDeps] = useState(true);
   const handleShareWorkflowSuccess = async (event: MessageEvent) => {
     const detail = event.data;
     if (
-      event.origin !== cloudHostRef.current ||
+      // event.origin !== cloudHostRef.current ||
       detail.type !== "share_workflow_success"
     ) {
       return;
@@ -77,7 +80,7 @@ export default function ShareDialog({ onClose }: Props) {
       (await workflowsTable?.updateMetaInfo(localID, {
         cloudID: cloudID,
         cloudOrigin: event.origin,
-        privacy: privacy,
+        privacy: privacyRef.current,
       }));
     localVerID &&
       cloudVersionID &&
@@ -95,8 +98,18 @@ export default function ShareDialog({ onClose }: Props) {
   useEffect(() => {
     loadData();
     window.addEventListener("message", handleShareWorkflowSuccess);
+    const shareDepsToCloud = (event: any) => {
+      if (event.detail) {
+        pushToCloud(event.detail ? JSON.stringify(event.detail) : undefined);
+      }
+    };
+    window.addEventListener("workspace_info_deps_updated", shareDepsToCloud);
     return () => {
       window.removeEventListener("message", handleShareWorkflowSuccess);
+      window.removeEventListener(
+        "workspace_info_deps_updated",
+        shareDepsToCloud,
+      );
     };
   }, []);
 
@@ -106,11 +119,8 @@ export default function ShareDialog({ onClose }: Props) {
         ? await userSettingsTable?.getSetting("cloudHost")
         : "http://localhost:3000";
     if (host) {
-      setCloudHost(host);
       cloudHostRef.current = host;
     }
-    const workflow = workflowsTable?.curWorkflow ?? undefined;
-    setWorkflow(workflow);
     if (workflow?.cloudID && workflow.cloudOrigin) {
       fetchCloudWorkflowPrivacy(workflow).then((privacy) => {
         setPrivacy(privacy);
@@ -135,7 +145,7 @@ export default function ShareDialog({ onClose }: Props) {
         console.error("Failed to copy text: ", err);
       });
   };
-  const onShare = async () => {
+  const pushToCloud = async (jsonToShare?: string) => {
     setLoading(true);
     const secretKey = generateRandomKey(32);
     const host =
@@ -151,7 +161,7 @@ export default function ShareDialog({ onClose }: Props) {
           workflowID: workflow!.id,
           name: versionName,
           createTime: Date.now(),
-          json: JSON.stringify(app.graph.serialize()),
+          json: jsonToShare ?? JSON.stringify(app.graph.serialize()),
         });
       } else {
         version = await workflowVersionsTable?.get(selectedVersion);
@@ -186,7 +196,7 @@ export default function ShareDialog({ onClose }: Props) {
             workflow: curWorkflow,
             version: version,
             nodeDefs: nodeDefs,
-            privacy: privacy,
+            privacy: privacyRef.current,
           },
           host,
         );
@@ -195,13 +205,37 @@ export default function ShareDialog({ onClose }: Props) {
     };
     window.addEventListener("message", handleChildReady);
   };
+  const onShare = async () => {
+    if (enableDeps) {
+      formRef.current?.requestSubmit();
+    } else {
+      pushToCloud();
+    }
+  };
 
   const cloudWorkflowID = workflowsTable?.curWorkflow?.cloudID;
   return (
     <Modal isOpen={true} onClose={onClose} size={"lg"}>
       <ModalOverlay />
       <ModalContent width={["98%", "90%", "50%"]} maxWidth={"600px"}>
-        <ModalHeader>Share "{workflow?.name}"</ModalHeader>
+        <ModalHeader>
+          <Flex justifyContent={"space-between"}>
+            <p>Share "{workflow?.name}"</p>
+            <Button
+              colorScheme="teal"
+              onClick={onShare}
+              size={"sm"}
+              isDisabled={loading}
+            >
+              {loading ? "Sharing" : "Share"}
+            </Button>
+          </Flex>
+          {cloudHost && (
+            <Text fontSize={16} color={"GrayText"} fontWeight={400}>
+              Share to {new URL(cloudHost).host}
+            </Text>
+          )}
+        </ModalHeader>
         <ModalBody pb={10}>
           <Stack gap={5}>
             {cloudWorkflowID == null ? (
@@ -224,6 +258,7 @@ export default function ShareDialog({ onClose }: Props) {
             {cloudWorkflowID && (
               <HStack spacing={2} color="teal.400">
                 <Link
+                  wordBreak={"break-all"}
                   href={cloudHost + "/workflow/" + cloudWorkflowID}
                   isExternal
                 >
@@ -235,9 +270,8 @@ export default function ShareDialog({ onClose }: Props) {
                 </Link>
 
                 <Button
-                  width={"180px"}
                   size={"sm"}
-                  leftIcon={<IconCopy />}
+                  leftIcon={<IconCopy size={18} />}
                   onClick={() => {
                     copyTextToClipboard(
                       cloudHost +
@@ -250,7 +284,7 @@ export default function ShareDialog({ onClose }: Props) {
                 </Button>
               </HStack>
             )}
-            <Text>Choose a version to share:</Text>
+            {/* <Text>Choose a version to share:</Text> */}
             <RadioGroup
               gap={4}
               onChange={(val) => {
@@ -260,7 +294,7 @@ export default function ShareDialog({ onClose }: Props) {
             >
               <Stack>
                 <HStack mb={5} alignItems={"center"}>
-                  <Radio key={"new_version"} value="new_version" />
+                  {/* <Radio key={"new_version"} value="new_version" /> */}
                   <Input
                     value={versionName}
                     width={"60%"}
@@ -272,11 +306,11 @@ export default function ShareDialog({ onClose }: Props) {
                     }}
                   />
                   <Flex color="green">
-                    <Badge colorScheme="purple">New version</Badge>
+                    <Badge colorScheme="purple">Version Name</Badge>
                   </Flex>
                 </HStack>
 
-                {localVersions.slice(0, 4).map((ver) => {
+                {/* {localVersions.slice(0, 4).map((ver) => {
                   return (
                     <ShareDialogWorkflowVersionRadio
                       key={ver.id}
@@ -285,15 +319,28 @@ export default function ShareDialog({ onClose }: Props) {
                       cloudWorkflowID={cloudWorkflowID ?? null}
                     />
                   );
-                })}
+                })} */}
               </Stack>
             </RadioGroup>
+            <Stack borderRadius={6} borderWidth={"1px"} p={2}>
+              <Switch
+                isChecked={enableDeps}
+                onChange={() => setEnableDeps(!enableDeps)}
+                fontWeight={"600"}
+              >
+                Share Resource Links
+              </Switch>
+              {enableDeps && (
+                <>
+                  <span style={{ color: "GrayText" }}>
+                    You can disable reource sharing if you don't want to resolve
+                    submit errors
+                  </span>
+                  <ResourceDepsForm ref={formRef} />
+                </>
+              )}
+            </Stack>
           </Stack>
-          <HStack justifyContent={"flex-end"} mt={16}>
-            <Button colorScheme="teal" onClick={onShare} isDisabled={loading}>
-              {loading ? "Sharing" : "Share"}
-            </Button>
-          </HStack>
         </ModalBody>
       </ModalContent>
     </Modal>

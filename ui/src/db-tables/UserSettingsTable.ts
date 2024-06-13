@@ -1,4 +1,4 @@
-import { UserSettings } from "../types/dbTypes";
+import type { UserSettings } from "../types/dbTypes";
 import { TableBase } from "./TableBase";
 import { MODEL_TYPE_TO_FOLDER_MAPPING } from "../model-manager/install-models/util/modelTypes";
 import { fetchMyWorkflowsDir } from "../Api";
@@ -14,22 +14,14 @@ export class UserSettingsTable extends TableBase<UserSettings> {
    * So we maintain an autoSave here that is always up to date.
    */
   private _autoSave: boolean = false;
+  private _settings: UserSettings | undefined = undefined;
+
+  get settings() {
+    return this._settings;
+  }
 
   get autoSave() {
     return this._autoSave;
-  }
-  // when drag drop / load a workflow, we need to temporarly disable autoSave to avoid the workflow being saved to the wrong id
-  __TEMP_OVERRIDE_ONLY_disableAutoSave() {
-    if (!this._autoSave) {
-      return;
-    }
-    this._autoSave = false;
-    setTimeout(async () => {
-      this._autoSave =
-        (await this.getSetting("autoSave")) ??
-        this.defaultSettings.autoSave ??
-        true;
-    }, 3000);
   }
 
   constructor() {
@@ -40,21 +32,22 @@ export class UserSettingsTable extends TableBase<UserSettings> {
         top: 0,
         left: 0,
       },
-      modelManagerTopBarStyle: {
-        top: 0,
-        right: 0,
-      },
       myWorkflowsDir: "",
       shortcuts: {
         save: "Shift+S",
         saveAs: "Control+Alt+S",
+        openSpotlightSearch: "Control+P",
       },
       defaultFolders: MODEL_TYPE_TO_FOLDER_MAPPING,
-      autoSave: true,
+      autoSave: false,
+      autoSaveDuration: 3,
       twoWaySync: false,
       foldersOnTop: false,
-      cloudHost: "https://www.comfyspace.art",
+      cloudHost: "https://www.nodecafe.org",
       overwriteCurWorkflowWhenDroppingFileToCanvas: false,
+      maximumChangelogNumber: 80,
+      hideCoverImage: false,
+      disableUnsavedWarning: false,
     };
   }
 
@@ -64,6 +57,12 @@ export class UserSettingsTable extends TableBase<UserSettings> {
     const currentUserSettings: UserSettings | undefined = await this.get(
       this.DEFAULT_USER,
     );
+    if (key === "shortcuts" && currentUserSettings?.shortcuts) {
+      return {
+        ...this.defaultSettings.shortcuts,
+        ...currentUserSettings.shortcuts,
+      } as UserSettings[K];
+    }
     return currentUserSettings?.[key] ?? this.defaultSettings[key];
   }
 
@@ -75,23 +74,31 @@ export class UserSettingsTable extends TableBase<UserSettings> {
       ...newPairs,
     };
     await this.put(newSettings);
-    if (
-      Object.hasOwn(newPairs, "autoSave") &&
-      newPairs.autoSave !== undefined
-    ) {
-      this._autoSave = newPairs.autoSave;
-    }
+    this._settings = {
+      ...this.defaultSettings,
+      ...newSettings,
+    };
   }
 
   static async load(): Promise<UserSettingsTable> {
     const instance = new UserSettingsTable();
     const myWorkflowsDir = await fetchMyWorkflowsDir();
 
-    instance.defaultSettings.myWorkflowsDir = myWorkflowsDir!;
+    instance.defaultSettings.myWorkflowsDir = myWorkflowsDir.path!;
 
-    await instance.getSetting("autoSave").then((res) => {
-      instance._autoSave = res ?? true;
+    await instance.get(instance.DEFAULT_USER).then((res) => {
+      instance._autoSave = res?.autoSave ?? false;
+      instance._settings = {
+        ...instance.defaultSettings,
+        ...res,
+      };
     });
+    if (instance.defaultSettings.cloudHost.includes("comfyspace.art")) {
+      // overwrite legacy comfyspace.art
+      await instance.upsert({
+        cloudHost: instance.defaultSettings.cloudHost,
+      });
+    }
     return instance;
   }
 }

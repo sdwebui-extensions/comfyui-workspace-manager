@@ -1,119 +1,94 @@
-import { Button, HStack } from "@chakra-ui/react";
-import { lazy, useEffect, useState, DragEvent } from "react";
+import { Button, DarkMode, Stack } from "@chakra-ui/react";
+import { lazy, useEffect, useContext, Suspense } from "react";
 import ModelsListDrawer from "../models-list-drawer/ModelsListDrawer";
-import { IconGripVertical } from "@tabler/icons-react";
-import Draggable from "../../components/Draggable";
-
-// @ts-ignore
-import { app } from "/scripts/app.js";
 import "./index.css";
-import { userSettingsTable } from "../../db-tables/WorkspaceDB";
-import { ModelManagerPosition } from "../../types/dbTypes";
+import { WorkspaceContext } from "../../WorkspaceContext";
+// @ts-ignore
+import { api } from "/scripts/api.js";
+
+import { Model } from "../../types/dbTypes";
+import { fetchCivitModelFromHashKey } from "../../utils/civitUtils";
+import { indexdb } from "../../db-tables/indexdb";
+import type { ModelsListRespItemFromApi } from "../types";
+import InatallModelsModal from "../install-models/InstallModelsModal";
+import { TOPBAR_BUTTON_HEIGHT } from "../../const";
 
 const AddMissingModelsButton = lazy(
   () => import("./InstallMissingModelsButton"),
 );
 
 export default function ModelManagerTopbar() {
-  const [showMyModels, setShowMyModels] = useState(false);
-  const [positionStyle, setPositionStyle] = useState<ModelManagerPosition>();
-
-  const handleModelDrop = async (
-    e: DragEvent<HTMLCanvasElement> & { canvasX: number; canvasY: number },
-  ) => {
-    const eventName = e.dataTransfer.getData("eventName");
-    if (eventName !== "WorkspaceManagerAddNode") {
-      return;
-    }
-    const modelRelativePath = e.dataTransfer.getData("modelRelativePath");
-    const nodeType = e.dataTransfer.getData("nodeType");
-    // @ts-ignore
-    const node = LiteGraph.createNode(nodeType);
-    node.pos = [e.canvasX, e.canvasY];
-    node.configure({ widgets_values: [modelRelativePath] });
-    app.graph.add(node);
-  };
+  const { setRoute, route } = useContext(WorkspaceContext);
 
   useEffect(() => {
-    userSettingsTable?.getSetting("modelManagerTopBarStyle").then((res) => {
-      updatePosition(res, false);
-    });
-    app.canvasEl.addEventListener("drop", handleModelDrop);
-    return () => {
-      app.canvasEl.removeEventListener("drop", handleModelDrop);
-    };
+    api.addEventListener(
+      "model_list",
+      async (e: { detail: ModelsListRespItemFromApi[] }) => {
+        const modelsPromises = e.detail?.map(async (item) => {
+          const existing = await indexdb.models.get(
+            item.model_name + "@" + item.model_type,
+          );
+          // avoid overwriting existing models cuz it may have downloadUrl info
+          if (existing?.fileHash) return existing;
+          let newModel: Model = {
+            id: item.model_name + "@" + item.model_type,
+            modelName: null,
+            fileHash: item.file_hash ?? null,
+            fileFolder: item.model_type,
+            fileName: item.model_name + item.model_extension,
+          };
+          if (!item.file_hash) return newModel;
+          const json = await fetchCivitModelFromHashKey(item.file_hash);
+          newModel = {
+            ...newModel,
+            modelName: json.modelName ?? null,
+            civitModelID: json.civitModelID,
+            civitModelVersionID: json.civitModelVersionID,
+            imageUrl: json.imageUrl ?? null,
+          };
+          return newModel;
+        });
+        const models = (await Promise.all(modelsPromises)).filter(
+          (model) => model != null,
+        );
+        // clear first so deleted models can be removed?
+        await indexdb.models.clear();
+        await indexdb.models.bulkPut(
+          models.filter((model) => model != null) as Model[],
+        );
+        window.dispatchEvent(new CustomEvent("model_list_updated"));
+      },
+    );
   }, []);
 
-  const updatePosition = (
-    position?: ModelManagerPosition,
-    needUpdateDB: boolean = false,
-  ) => {
-    const { top: curTop = 0, right: curRight = 0 } = positionStyle || {};
-    const { top = 0, right = 0 } = position ?? {};
-    let newTop = curTop + top;
-    let newRight = positionStyle === undefined ? right : curRight - right;
-    const clientWidth = document.documentElement.clientWidth;
-    const clientHeight = document.documentElement.clientHeight;
-    const panelElement = document.getElementById("modelManagerTopBar");
-    const offsetWidth = panelElement?.offsetWidth || 224;
-
-    if (newTop + 32 > clientHeight) newTop = clientHeight - 38;
-    if (newRight + offsetWidth > clientWidth)
-      newRight = clientWidth - offsetWidth - 4;
-
-    setPositionStyle({
-      top: Math.max(4, newTop),
-      right: Math.max(4, newRight),
-    });
-
-    needUpdateDB &&
-      userSettingsTable?.upsert({
-        modelManagerTopBarStyle: { top: newTop, right: newRight },
-      });
-  };
-
   return (
-    <Draggable
-      onDragEnd={(position: { x: number; y: number }) => {
-        updatePosition({ top: position.y, right: position.x }, true);
-      }}
-      dragIconId="dragModelManagerTopBarIcon"
-    >
-      {positionStyle ? (
-        <HStack
-          style={{
-            position: "fixed",
-            ...positionStyle,
-          }}
-          gap={2}
-          draggable={false}
-          id="modelManagerTopBar"
-          className="model-manager-top-bar"
-        >
-          <IconGripVertical
-            id="dragModelManagerTopBarIcon"
-            className="drag-model-manager-top-bar-icon"
-            cursor="move"
-            size={15}
-            color="#FFF"
-          />
+    <Stack style={{ position: "relative" }}>
+      <Button
+        size={"sm"}
+        backgroundColor={"#434554"}
+        color={"white"}
+        colorScheme="blue"
+        aria-label="My models"
+        onClick={() => setRoute("modelList")}
+        px={1}
+        height={TOPBAR_BUTTON_HEIGHT + "px"}
+      >
+        Models
+      </Button>
+      <div style={{ position: "absolute", top: "38px", left: "0px" }}>
+        <Suspense>
           <AddMissingModelsButton />
-          <Button
-            size={"sm"}
-            colorScheme="blue"
-            aria-label="My models"
-            onClick={() => setShowMyModels(true)}
-            px={1}
-          >
-            Models
-          </Button>
-          {showMyModels && (
-            <ModelsListDrawer onClose={() => setShowMyModels(false)} />
-          )}
-        </HStack>
-      ) : (
-        ""
+        </Suspense>
+      </div>
+      {route === "modelList" && (
+        <ModelsListDrawer onClose={() => setRoute("root")} />
       )}
-    </Draggable>
+      {route === "installModels" && (
+        <InatallModelsModal
+          modelType="Checkpoint"
+          onclose={() => setRoute("root")}
+        />
+      )}
+    </Stack>
   );
 }

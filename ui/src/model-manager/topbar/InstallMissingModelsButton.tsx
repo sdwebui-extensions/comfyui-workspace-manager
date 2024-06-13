@@ -1,12 +1,12 @@
 import { Button } from "@chakra-ui/react";
 // @ts-ignore
-import { app } from "/scripts/app.js";
-// @ts-ignore
 import { api } from "/scripts/api.js";
 import { useEffect, useState } from "react";
 import MissingModelsListDrawer, {
   MissingModel,
 } from "../missing-models-drawer/MissingModelsListDrawer";
+import { COMFYSPACE_TRACKING_FIELD_NAME } from "../../const";
+import { app } from "../../utils/comfyapp";
 interface Props {}
 
 interface NodeError {
@@ -32,17 +32,21 @@ export default function InstallMissingModelsButton({}: Props) {
     const queuePrompt = app.queuePrompt as Function;
     app.queuePrompt = async function () {
       try {
-        await queuePrompt.apply(app, [...arguments]);
+        await queuePrompt.apply(this, arguments);
       } finally {
+        const deps = app.graph.extra?.[COMFYSPACE_TRACKING_FIELD_NAME]?.deps;
+        if (!deps) {
+          return;
+        }
         const nodeErrors = (app.lastNodeErrors ?? {}) as Record<
           string,
           NodeError
         >;
         setMissingModels(
           Object.values(nodeErrors).flatMap((nodeError) =>
-            nodeError.errors
-              .filter((error) => error.type === "value_not_in_list")
-              .map((error) => {
+            nodeError?.errors
+              ?.filter((error) => error?.type === "value_not_in_list")
+              ?.map((error) => {
                 const { input_name, received_value } = error.extra_info;
                 return {
                   class_type: nodeError.class_type,
@@ -54,18 +58,6 @@ export default function InstallMissingModelsButton({}: Props) {
         );
       }
     };
-    // const graphJson = app.graph.serialize();
-    // console.log(graphJson);
-    // fetch("/model_manager/find_missing_models", {
-    //   method: "POST",
-    //   body: JSON.stringify({
-    //     workflow: graphJson,
-    //   }),
-    // })
-    //   .then((res) => res.json())
-    //   .then((res) => {
-    //     console.log(res);
-    //   });
   }, []);
   if (missingModels.length === 0) {
     return null;
@@ -77,6 +69,7 @@ export default function InstallMissingModelsButton({}: Props) {
         aria-label="missing models"
         px={2}
         onClick={() => setShowMyModels(true)}
+        colorScheme="teal"
       >
         Install Missing ({missingModels.length})
       </Button>

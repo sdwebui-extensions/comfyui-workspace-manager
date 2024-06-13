@@ -1,4 +1,5 @@
 import asyncio
+import folder_paths
 from datetime import datetime
 import platform
 import tempfile
@@ -36,10 +37,10 @@ def save_file_sync(reqJson):
         # Compare the current id with the expected id
         if current_id is not None and current_id != expected_id:
             return {"error": "Mismatching workspace_info.id."}
-    except json.JSONDecodeError:
-        return { "error": "Existing file is not a valid JSON."}
     except FileNotFoundError:
         return {"error": f"File not found in path {current_path}"}
+    except Exception as e:
+        return { "error": str(e)}
     
     # If checks pass, write the new JSON data to the file
     try:
@@ -131,6 +132,59 @@ def read_workflow_file(path, id):
                 return {"json": json_data, "createTime": create_time, "updateTime": update_time}
             return {"error": "Workflow ID doesn't match"}
     return {"error": "No workspace_info.id found in the file"}
+
+
+def check_and_update_workflow_id(file_path, seen_ids):
+    with open(file_path, "r", encoding="utf-8") as f:
+        try:
+                json_data = json.load(f)
+        except json.JSONDecodeError as e:
+            print(f"Error reading JSON from {file_path}: {e}")
+            return
+        if (
+            "extra" in json_data
+            and "workspace_info" in json_data["extra"]
+            and "id" in json_data["extra"]["workspace_info"]
+        ):
+            workflow_id = json_data["extra"]["workspace_info"]["id"]
+            create_time, update_time = getFileCreateTime(file_path)
+            if workflow_id in seen_ids:
+                if create_time > seen_ids[workflow_id]["time"]:
+                    # Update the current file
+                    json_data["extra"]["workspace_info"]["id"] = str(uuid.uuid4())
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        json.dump(json_data, f)
+                else:
+                    # Update the previously seen file
+                    old_file_path = seen_ids[workflow_id]["path"]
+                    with open(old_file_path, "r", encoding="utf-8") as f:
+                        old_json_data = json.load(f)
+                    old_json_data["extra"]["workspace_info"]["id"] = str(uuid.uuid4())
+                    with open(old_file_path, "w", encoding="utf-8") as f:
+                        json.dump(old_json_data, f)
+            seen_ids[workflow_id] = {
+                "time": create_time,
+                "path": file_path,
+            }
+
+
+def dedupe_workflow_ids():
+    abs_path = get_my_workflows_dir()
+    seen_ids = {}
+    for root, dirs, files in os.walk(abs_path):
+        for file in files:
+            if not file.endswith(".json"):
+                continue
+            file_path = os.path.join(root, file)
+            try:
+                check_and_update_workflow_id(file_path, seen_ids)
+            except Exception as e:
+                print(f"Error while processing file {file_path}: {e}")
+
+@server.PromptServer.instance.routes.get('/workspace/deduplicate_workflow_ids')
+async def deduplicate_workflow_ids(request):
+    await asyncio.to_thread(dedupe_workflow_ids)
+    return web.json_response(text="success", content_type='application/json')
 
 @server.PromptServer.instance.routes.post('/workspace/get_workflow_file')
 async def get_workflow_file(request):
@@ -241,9 +295,6 @@ def count_files_sync(reqJson):
         if file.is_file():
             file_count += 1
     return {"success": True, "count": file_count}
-
-
-
 # Begin: Copy all files to the new directory when switching the save directory
 @server.PromptServer.instance.routes.post('/workspace/copy_json_files')
 async def copy_json_files(request):
@@ -282,3 +333,32 @@ async def get_unique_dir_name(path):
         counter += 1
     return path
 # End: Copy all files to the new directory when switching the save directory
+
+@server.PromptServer.instance.routes.post('/workspace/images/save')
+async def save_images(request):
+    reader = await request.multipart()
+    subfolder = "workspace_manager"  # 默认子文件夹，实际上你可能会从表单中动态获取
+    output_path = folder_paths.get_output_directory()
+    safe_dir = Path(os.path.join(output_path, subfolder))
+    if not safe_dir.exists():
+        safe_dir.mkdir(parents=True, exist_ok=True)
+
+    # 用于存储保存的文件路径
+    files_saved = []
+    # 处理multipart/form-data中的每一部分
+    async for part in reader:
+        if part.name.startswith('images'):
+            filename = part.filename
+            if not filename:
+                continue
+            file_path = safe_dir / filename
+            loop = asyncio.get_running_loop()
+            # 异步写入文件
+            with open(file_path, 'wb') as f:
+                while True:
+                    chunk = await part.read_chunk()  # 默认8192 bytes
+                    if not chunk:
+                        break
+                    await loop.run_in_executor(None, f.write, chunk)
+            files_saved.append(str(file_path))
+    return web.Response(text=json.dumps({"imgPaths": files_saved}), content_type='application/json')

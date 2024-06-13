@@ -16,6 +16,7 @@ from .service.media_service import *
 from .service.file_sync_service import *
 from .service.db_service import get_my_workflows_dir
 from comfy.cli_args import args
+from .service.node_service import *
 
 WEB_DIRECTORY = "entry"
 NODE_CLASS_MAPPINGS = {}

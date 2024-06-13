@@ -14,6 +14,9 @@ import FolderOnTopSettings from "../settings/FolderOnTopSettings";
 import TwoWaySyncSettings from "../settings/TwoWaySyncSettings";
 import CommonCheckboxSettings from "../settings/CommonCheckboxSettings";
 import SelectMyWorkflowsDir from "../settings/SelectMyWorkflowsDir";
+import { CommonNumberSetting } from "../settings/CommonNumberSetting";
+import AutosaveSetting from "../settings/AutosaveSetting";
+import CloudHostSetting from "../settings/CloudHostSetting";
 
 export default function WorkspaceSettingsModal({
   onClose,
@@ -36,17 +39,25 @@ export default function WorkspaceSettingsModal({
                 w="100%"
               >
                 <SelectMyWorkflowsDir />
+                <AutosaveSetting />
                 <ShortcutSettings />
-                <CommonCheckboxSettings
-                  settingKey="autoSave"
-                  text="Enable auto save workflow"
-                />
                 <TwoWaySyncSettings />
                 <FolderOnTopSettings />
                 <CommonCheckboxSettings
                   settingKey="overwriteCurWorkflowWhenDroppingFileToCanvas"
                   text="Overwrite current workflow when drag and drop workflow file to canvas"
                 />
+                <CommonNumberSetting
+                  label={`Maximum number of save change history to store. This does not include
+        versions that you created by "Create Version", which are always stored
+        and has no limit.`}
+                  settingKey="maximumChangelogNumber"
+                />
+                <CommonCheckboxSettings
+                  settingKey="hideCoverImage"
+                  text="Hide thumbnail image in workflow list"
+                />
+                <CloudHostSetting />
               </VStack>
             </HStack>
           </ModalBody>

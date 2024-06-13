@@ -13,8 +13,6 @@ import Fuse from "fuse.js/min-basic";
 import { useEffect, useState } from "react";
 import { ModelsTags } from "./ModelsTags";
 import { ModelsList } from "./ModelsList";
-// @ts-expect-error ComfyUI imports
-import { app } from "/scripts/app.js";
 import InstallModelsButton from "../install-models/InstallModelsButton";
 import { type ModelsListRespItem } from "../types";
 import { useUpdateModels } from "../hooks/useUpdateModels";
@@ -22,6 +20,8 @@ import { DRAWER_Z_INDEX } from "../../const";
 import ShowNsfwModelThumbnailSettings from "../../settings/ShowNsfwModelThumbnailSettings";
 import { indexdb } from "../../db-tables/indexdb";
 import { type Model } from "../../types/dbTypes";
+import ModelDropEventListener from "../topbar/ModelDropEventListener";
+import { app } from "../../utils/comfyapp";
 interface Props {
   onClose: () => void;
 }
@@ -156,6 +156,7 @@ export default function ModelsListDrawer({ onClose }: Props) {
             </Flex>
           )}
         </Card>
+        <ModelDropEventListener />
       </Box>
     </Portal>
   );

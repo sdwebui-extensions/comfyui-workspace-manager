@@ -1,17 +1,7 @@
-import { deleteFile, updateFile } from "./Api";
 import { ESortTypes } from "./RecentFilesDrawer/types";
-import { workflowsTable, userSettingsTable } from "./db-tables/WorkspaceDB";
-import {
-  generateFilePathAbsolute,
-  saveJsonFileMyWorkflows,
-} from "./db-tables/DiskFileUtils";
-import { Folder, Workflow, EShortcutKeys } from "./types/dbTypes";
-// @ts-expect-error ComfyUI import
-import { app } from "/scripts/app.js";
-import {
-  COMFYSPACE_TRACKING_FIELD_NAME,
-  LEGACY_COMFYSPACE_TRACKING_FIELD_NAME,
-} from "./const";
+import { userSettingsTable } from "./db-tables/WorkspaceDB";
+import { Workflow, EShortcutKeys, SortableItem } from "./types/dbTypes";
+import { app } from "./utils/comfyapp";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare let LiteGraph: any, LGraph: any, LGraphCanvas: any;
@@ -98,6 +88,7 @@ export function formatTimestamp(
   unixTimestamp: number,
   showHourMinue: boolean = true,
   showSec: boolean = false,
+  splitChar: string = "-",
 ) {
   // Create a new Date object from the UNIX timestamp
   const date = new Date(unixTimestamp);
@@ -110,7 +101,7 @@ export function formatTimestamp(
   const minutes = String(date.getMinutes()).padStart(2, "0");
   const seconds = String(date.getSeconds()).padStart(2, "0");
   // Format the date and time string
-  const res = `${month}-${day}-${year}`;
+  const res = `${month}${splitChar}${day}${splitChar}${year}`;
   if (showHourMinue) {
     return res + ` ${hours}:${minutes}`;
   }
@@ -150,27 +141,11 @@ export function sortFlows(
 
   return copyFlows;
 }
-export async function validateOrSaveAllJsonFileMyWorkflows(
-  deleteEmptyFolder = false,
-) {
-  const twoWaySync = await userSettingsTable?.getSetting("twoWaySync");
-  if (twoWaySync) return; // disable this function in two way sync mode
-  const flowList = (await workflowsTable?.listAll()) ?? [];
-  for (const workflow of flowList) {
-    const fullPath = await generateFilePathAbsolute(workflow);
-    if (workflow.filePath != fullPath) {
-      // file path changed
-      workflow.filePath != null &&
-        (await deleteFile(workflow.filePath, deleteEmptyFolder));
-      await saveJsonFileMyWorkflows(workflow);
-    }
-  }
-}
 
-export const sortFileItem = (
-  items: Array<Workflow | Folder>,
+export const sortFileItem = <T extends SortableItem>(
+  items: T[],
   sortType: ESortTypes = ESortTypes.RECENTLY_MODIFIED,
-) => {
+): T[] => {
   const copyFlows = [...items];
   switch (sortType) {
     case ESortTypes.AZ:
@@ -185,38 +160,66 @@ export const sortFileItem = (
     case ESortTypes.OLDEST_MODIFIED:
       copyFlows.sort((a, b) => a.updateTime - b.updateTime);
       break;
+    case ESortTypes.RECENTLY_OPENED:
+      copyFlows.sort(
+        (a, b) => (b.lastOpenedTime ?? 0) - (a.lastOpenedTime ?? 0),
+      );
+      break;
   }
   return copyFlows;
 };
 
+export function json2ClipboardString(graphData: any) {
+  const nodes = graphData.nodes;
+  const links = new Array();
+  const relative_id_map = new Map();
+  const exist_link_ids = new Array();
+  for (let i = 0; i < graphData.nodes.length; ++i) {
+    const node = graphData.nodes[i];
+    if (node.inputs) {
+      for (const input of node.inputs) {
+        if (input.link) {
+          exist_link_ids.push(input.link);
+          input.link = null;
+        }
+      }
+    }
+    if (node.outputs) {
+      for (const output of node.outputs) {
+        if (output.links) {
+          exist_link_ids.concat(output.links);
+          output.links = [];
+        }
+      }
+    }
+    relative_id_map.set(node.id, i);
+  }
+  for (const link of graphData.links) {
+    if (!exist_link_ids.includes(link[0])) {
+      continue;
+    }
+    links.push([
+      relative_id_map.get(link[1]),
+      link[2],
+      relative_id_map.get(link[3]),
+      link[4],
+      link[1],
+    ]);
+  }
+  return JSON.stringify({ nodes, links });
+}
+
 export function insertWorkflowToCanvas(json: string, insertPos?: number[]) {
   let graphData = JSON.parse(json);
-  if (typeof structuredClone === "undefined") {
-    graphData = JSON.parse(JSON.stringify(graphData));
-  } else {
-    graphData = structuredClone(graphData);
-  }
-
-  let tempGraph = new LGraph();
-  const hiddenCanvas = document.createElement("canvas");
-  hiddenCanvas.style.display = "none"; // Make it hidden
-  document.body.appendChild(hiddenCanvas); // Append to the body to make it part of the DOM
-  let tempCanvas = new LGraphCanvas(hiddenCanvas, tempGraph);
+  if (!graphData || !graphData.nodes || graphData.nodes.length == 0) return;
 
   const prevClipboard = localStorage.getItem("litegrapheditor_clipboard");
-  const prevGraph = app.graph;
-  const prevCanvas = app.canvas;
-  app.canvas = tempCanvas;
-  app.graph = tempGraph;
-  tempGraph.configure(graphData);
-  app.canvas.copyToClipboard(tempGraph._nodes);
 
-  // clear the tempGraph and remove the hiddenCanvas
-  tempCanvas.graph.clear();
-  document.body.removeChild(hiddenCanvas);
+  localStorage.setItem(
+    "litegrapheditor_clipboard",
+    json2ClipboardString(graphData),
+  );
 
-  app.graph = prevGraph;
-  app.canvas = prevCanvas;
   const priorPos = app.canvas.graph_mouse;
   if (insertPos) {
     insertPos[0] -= 15;
@@ -228,15 +231,16 @@ export function insertWorkflowToCanvas(json: string, insertPos?: number[]) {
   if (prevClipboard) {
     localStorage.setItem("litegrapheditor_clipboard", prevClipboard);
   }
-  // Nullify the temporary graph and canvas references for garbage collection
-  tempGraph = null;
-  tempCanvas = null;
 }
 
-export const matchShortcut = async (event: KeyboardEvent) => {
-  const shortcuts =
-    (await userSettingsTable?.getSetting("shortcuts")) ??
-    userSettingsTable?.defaultSettings.shortcuts;
+export const matchShortcut = (event: KeyboardEvent) => {
+  /**
+   * Where matchShortcut is used, the browser's default behavior needs to be prevented.
+   * So here you cannot get the shortcut keys by await userSettingsTable?.getSetting("shortcuts")
+   * Because the async await function will cause the browser's default behavior to fail;
+   */
+
+  const shortcuts = userSettingsTable?.settings?.shortcuts;
 
   if (!shortcuts) return false;
 
@@ -259,7 +263,7 @@ export const matchShortcut = async (event: KeyboardEvent) => {
       keys.length === Object.keys(pressedKeys).length &&
       keys.every((key) => pressedKeys[key])
     ) {
-      return shortcutType;
+      return shortcutType as EShortcutKeys;
     }
   }
 };
@@ -306,21 +310,3 @@ export const openWorkflowInNewTab = (workflowID: string) => {
   const newHash = generateUrlHashWithFlowId(workflowID);
   window.open(`${window.location.origin}/#${newHash}`);
 };
-
-export async function rewriteAllLocalFiles() {
-  const flowList = (await workflowsTable?.listAll()) ?? [];
-  for (const workflow of flowList) {
-    try {
-      const fullPath = await generateFilePathAbsolute(workflow);
-      const flow = JSON.parse(workflow.json);
-      flow.extra[COMFYSPACE_TRACKING_FIELD_NAME] = {
-        id: workflow.id,
-        name: workflow.name,
-      };
-      delete flow.extra[LEGACY_COMFYSPACE_TRACKING_FIELD_NAME];
-      fullPath && (await updateFile(fullPath, JSON.stringify(flow)));
-    } catch (error) {
-      console.error(error);
-    }
-  }
-}

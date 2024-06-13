@@ -15,7 +15,11 @@ import {
 import { ESortTypes, ImportWorkflow } from "../RecentFilesDrawer/types";
 import { defaultGraph } from "../defaultGraph";
 import { scanMyWorkflowsDir } from "../utils/twowaySyncUtils";
-import { TwowaySyncAPI } from "../apis/TwowaySyncApi";
+import {
+  ScanLocalFile,
+  TwowaySyncAPI,
+  scanLocalFiles,
+} from "../apis/TwowaySyncApi";
 import { COMFYSPACE_TRACKING_FIELD_NAME } from "../const";
 
 export class WorkflowsTable extends TableBase<Workflow> {
@@ -119,20 +123,19 @@ export class WorkflowsTable extends TableBase<Workflow> {
   public async createFlow(
     input: Partial<Workflow>,
   ): Promise<Workflow | undefined> {
-    const { id, json, name } = input;
+    const { name } = input;
     const newFlowName = await this.generateUniqueName(
       name,
       input.parentFolderID ?? undefined,
     );
-    const uuid = id ?? nanoid(); // ⇨ '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d'
     const time = Date.now();
     const newWorkflow: Workflow = {
       ...input,
-      id: uuid,
-      json: json ?? JSON.stringify(defaultGraph),
+      id: input.id ?? nanoid(),
+      json: input.json ?? JSON.stringify(defaultGraph),
       name: newFlowName,
-      updateTime: time,
-      createTime: time,
+      updateTime: input.updateTime ?? time,
+      createTime: input.createTime ?? time,
     };
     //add to IndexDB
     await indexdb.workflows.add(newWorkflow);
@@ -155,6 +158,13 @@ export class WorkflowsTable extends TableBase<Workflow> {
     _change: Partial<Workflow>,
   ): Promise<Workflow | null> {
     throw new Error("Method not allowed.");
+  }
+
+  public async updateTopFields(
+    id: string,
+    change: Pick<Partial<Workflow>, "topFieldsConfig">,
+  ): Promise<Workflow | null> {
+    return this._update(id, change);
   }
 
   public async updateMetaInfo(
@@ -335,7 +345,8 @@ export class WorkflowsTable extends TableBase<Workflow> {
   ): Promise<(Workflow | Folder)[]> {
     const twoWaySyncEnabled = await userSettingsTable?.getSetting("twoWaySync");
     if (twoWaySyncEnabled) {
-      return await scanMyWorkflowsDir(folderID ?? null);
+      const items = await scanMyWorkflowsDir(folderID ?? null);
+      return sortFileItem(items, sortBy ?? ESortTypes.RECENTLY_MODIFIED);
     }
     const workflows =
       (await this.listAll().then((list) =>
@@ -378,5 +389,32 @@ export class WorkflowsTable extends TableBase<Workflow> {
       ...wf,
       json: JSON.stringify(data.json),
     };
+  }
+
+  public async listAll(sortBy?: ESortTypes): Promise<Workflow[]> {
+    const twoWaySyncEnabled = await userSettingsTable?.getSetting("twoWaySync");
+    let list: Workflow[];
+    if (twoWaySyncEnabled) {
+      const fileList = (await scanLocalFiles("", true)).filter(
+        (f) => f?.type === "workflow",
+      ) as ScanLocalFile[];
+      const allFilesPromises = fileList.map(async (file) => {
+        const fileInfoInDB = await indexdb.workflows.get(file.id);
+        file.updateTime = fileInfoInDB?.updateTime ?? Date.now();
+        fileInfoInDB?.lastOpenedTime &&
+          (file.lastOpenedTime = fileInfoInDB?.lastOpenedTime);
+        return file;
+      });
+      list = await Promise.all(allFilesPromises);
+    } else {
+      list = await indexdb.workflows.toArray();
+    }
+    return sortBy ? sortFileItem(list, sortBy) : list;
+  }
+
+  public async updateLastOpenedTime(id: string) {
+    await indexdb.workflows.update(id, {
+      lastOpenedTime: Date.now(),
+    });
   }
 }

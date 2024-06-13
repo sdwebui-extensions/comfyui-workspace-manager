@@ -15,6 +15,8 @@ import {
   Tab,
   TabPanel,
   useToast,
+  HStack,
+  Tag,
 } from "@chakra-ui/react";
 import { IconX } from "@tabler/icons-react";
 import {
@@ -25,14 +27,14 @@ import {
 import { useContext, useEffect, useState } from "react";
 import { WorkspaceContext } from "../WorkspaceContext";
 import { formatTimestamp } from "../utils";
-// @ts-ignore
-import { app } from "/scripts/app.js";
 import { Changelog, WorkflowVersion } from "../types/dbTypes";
 import DeleteConfirm from "./DeleteConfirm";
+import { app } from "../utils/comfyapp";
 
 export function VersionHistoryDrawer({ onClose }: { onClose: () => void }) {
   const toast = useToast();
-  const { curFlowID, isDirty, loadWorkflowID } = useContext(WorkspaceContext);
+  const { curFlowID, isDirty, loadWorkflowID, curVersion } =
+    useContext(WorkspaceContext);
   const [active, setActive] = useState(0); // 0: version、1: changelog
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
   const [changelogs, setChangelogs] = useState<Changelog[]>([]);
@@ -53,11 +55,6 @@ export function VersionHistoryDrawer({ onClose }: { onClose: () => void }) {
     const vers =
       (await workflowVersionsTable?.listByWorkflowID(curFlowID!)) ?? [];
     setVersions(vers);
-
-    const graphJson = JSON.stringify(app.graph.serialize());
-    const selectedVer = vers?.filter((c) => c.json === graphJson);
-    const selectedVerID = selectedVer?.[0]?.id;
-    selectedVerID && setSelectedVersion(selectedVerID);
   };
 
   const onDelete = (id: string) => {
@@ -86,7 +83,7 @@ export function VersionHistoryDrawer({ onClose }: { onClose: () => void }) {
 
   return (
     <Card
-      width={400}
+      width={430}
       height={"100vh"}
       gap={0}
       position={"fixed"}
@@ -128,7 +125,7 @@ export function VersionHistoryDrawer({ onClose }: { onClose: () => void }) {
                       mb={1}
                       justify={"space-between"}
                       backgroundColor={
-                        version.id === selectedVersion ? "teal.300" : undefined
+                        version.id === curVersion?.id ? "teal.300" : undefined
                       }
                       borderRadius={4}
                     >
@@ -152,12 +149,6 @@ export function VersionHistoryDrawer({ onClose }: { onClose: () => void }) {
                             }
                             app.loadGraphData(JSON.parse(version.json));
                             loadWorkflowID(curFlowID!, version.id);
-                            // toast({
-                            //   title: `Switched to version "${version.name}"`,
-                            //   status: "success",
-                            //   duration: 3000,
-                            //   isClosable: true,
-                            // });
                             onClose();
                           }}
                         >
@@ -180,27 +171,34 @@ export function VersionHistoryDrawer({ onClose }: { onClose: () => void }) {
               <Stack divider={<StackDivider />} spacing={2}>
                 {changelogs?.map((c) => {
                   return (
-                    <Button
-                      key={c.id}
-                      size={"sm"}
-                      variant={"ghost"}
-                      onClick={() => {
-                        if (isDirty) {
-                          alert(
-                            "You have unsaved changes, please save or discard your changes to proceed switching version, in case losing your changes.",
-                          );
-                          return;
-                        }
-                        app.loadGraphData(JSON.parse(c.json));
-                        workflowsTable?.updateFlow(curFlowID!, {
-                          json: c.json,
-                        });
-                        onClose();
-                      }}
-                      isActive={c.id === selectedVersion}
-                    >
-                      Saved at {formatTimestamp(c.createTime, true)}
-                    </Button>
+                    <HStack key={c.id} justifyContent={"space-between"}>
+                      <Button
+                        key={c.id}
+                        size={"sm"}
+                        variant={"ghost"}
+                        onClick={() => {
+                          if (isDirty) {
+                            alert(
+                              "You have unsaved changes, please save or discard your changes to proceed switching version, in case losing your changes.",
+                            );
+                            return;
+                          }
+                          app.loadGraphData(JSON.parse(c.json));
+                          workflowsTable?.updateFlow(curFlowID!, {
+                            json: c.json,
+                          });
+                          onClose();
+                        }}
+                        isActive={c.id === selectedVersion}
+                      >
+                        Saved at {new Date(c.createTime).toLocaleString()}
+                      </Button>
+                      {c.isAutoSave ? (
+                        <Tag colorScheme="teal" size={"sm"}>
+                          Auto save
+                        </Tag>
+                      ) : null}
+                    </HStack>
                   );
                 })}
               </Stack>

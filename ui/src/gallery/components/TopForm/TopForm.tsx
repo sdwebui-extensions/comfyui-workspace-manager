@@ -1,43 +1,34 @@
-import { MetaData } from "../../utils.ts";
-import { TopFieldType } from "../MetaBox/MetaBox.tsx";
 import { Flex } from "@chakra-ui/react";
 import { FormItemComponent } from "../FormItem/FormItemComponent.tsx";
-import { FormItem } from "../FormItem/types.ts";
+import { useContext } from "react";
+import { MetaBoxContext } from "../MetaBox/metaBoxContext.ts";
 
-export default function TopForm({
-  metaData,
-  updateMetaData,
-  topFields,
-  updateTopField,
-}: {
-  metaData: MetaData;
-  topFields: TopFieldType[];
-  updateMetaData: FormItem["updateMetaData"];
-  updateTopField?: (field: TopFieldType) => void;
-}) {
-  const prompt = metaData.prompt;
+export default function TopForm() {
+  const { topFields, updateTopField, calcInputList } =
+    useContext(MetaBoxContext);
+  if (topFields.length === 0) return null;
+
   return (
     <>
-      {topFields?.length > 0 && (
-        <Flex px={2} gap={2} direction={"column"}>
-          {topFields?.map((field, i) => {
-            if (!prompt?.[field.promptKey]?.inputs) return null;
-            const promptValue = prompt?.[field.promptKey]?.inputs?.[field.name];
-            return (
-              <FormItemComponent
-                key={`formTop${field.name}${i}`}
-                promptKey={field.promptKey as string}
-                classType={prompt?.[field.promptKey]?.class_type}
-                name={field.name}
-                value={promptValue}
-                updateMetaData={updateMetaData}
-                updateTopField={updateTopField}
-                topFields={topFields}
-              />
-            );
-          })}
-        </Flex>
-      )}
+      <Flex px={2} gap={2} direction={"column"}>
+        {topFields?.map((field) => {
+          const input = calcInputList.find(
+            (input) =>
+              input.nodeID == field.promptKey &&
+              input.inputName === field.name &&
+              input.classType === field.class_type,
+          );
+          if (!field.class_type || !input) {
+            return null;
+          }
+          return (
+            <FormItemComponent
+              key={`formTopField${field.promptKey}${field.name}`}
+              inputItem={input}
+            />
+          );
+        })}
+      </Flex>
     </>
   );
 }

@@ -1,8 +1,8 @@
-import { v4 as uuidv4 } from "uuid";
 import { Table, workflowsTable } from "./WorkspaceDB";
 import { TableBase } from "./TableBase";
 import { Media } from "../types/dbTypes";
 import { indexdb } from "./indexdb";
+import { getMetadataFromUrl } from "../gallery/utils.ts";
 
 export class MediaTable extends TableBase<Media> {
   static readonly TABLE_NAME: Table = "media";
@@ -24,24 +24,43 @@ export class MediaTable extends TableBase<Media> {
   }): Promise<Media | null> {
     const format = input.localPath.split(".").pop();
     if (format == null) return null;
+
+    const res = await getMetadataFromUrl(
+      `/workspace/view_media?filename=${input.localPath}`,
+    ).catch((e) => {
+      console.error("get meta error:", e);
+      return { prompt: "" };
+    });
+
     const md: Media = {
-      id: uuidv4(),
+      id: input.localPath,
       localPath: input.localPath,
       workflowID: input.workflowID,
       createTime: Date.now(),
+      workflowJSON: JSON.stringify(res?.prompt),
       format: format,
     };
-    //link media to workflow
-    const workflow = await workflowsTable?.get(input.workflowID);
-    const newMedia = new Set(workflow?.mediaIDs ?? []).add(md.id);
     await workflowsTable?.updateMetaInfo(input.workflowID, {
-      mediaIDs: Array.from(newMedia),
-      coverMediaPath: md.localPath,
+      latestImage: md.localPath,
     });
     // save indexdb
-    indexdb.media.add(md);
+    indexdb.media.put(md);
     // save disk file db
     this.saveDiskDB();
     return md;
+  }
+
+  async delete(id: string): Promise<void> {
+    super.delete(id);
+    if (workflowsTable?.curWorkflow?.coverMediaPath === id) {
+      workflowsTable?.updateMetaInfo(workflowsTable.curWorkflow.id, {
+        coverMediaPath: undefined,
+      });
+    }
+    if (workflowsTable?.curWorkflow?.latestImage === id) {
+      workflowsTable?.updateMetaInfo(workflowsTable.curWorkflow.id, {
+        latestImage: undefined,
+      });
+    }
   }
 }
