@@ -75,4 +75,9 @@ def get_my_workflows_dir():
 
         if curDir and os.path.exists(curDir):
             return curDir
+    if not os.path.exists(os.path.join(args.data_dir, 'my_workflows')):
+        try:
+            os.makedirs(os.path.join(args.data_dir, 'my_workflows'))
+        except:
+            pass
     return os.path.join(args.data_dir, 'my_workflows')
