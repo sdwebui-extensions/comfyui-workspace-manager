@@ -1,11 +1,6 @@
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef } from "react";
 import { WorkspaceContext } from "../WorkspaceContext";
-import {
-  changelogsTable,
-  userSettingsTable,
-  workflowsTable,
-} from "../db-tables/WorkspaceDB";
-import { Tag, Tooltip } from "@chakra-ui/react";
+import { workflowsTable } from "../db-tables/WorkspaceDB";
 import { matchShortcut } from "../utils";
 import { EShortcutKeys } from "../types/dbTypes";
 import useDebounceFn from "../customHooks/useDebounceFn";
@@ -24,8 +19,6 @@ export default function AppIsDirtyEventListener() {
     setCurFlowIDAndName,
   } = useContext(WorkspaceContext);
   const isDirtRef = useRef(isDirty);
-  const [isOutdated, setIsOutdated] = useState(false);
-  const autoSaveTimer = useRef<number | null>(null);
 
   useEffect(() => {
     isDirtRef.current = isDirty;
@@ -66,6 +59,28 @@ export default function AppIsDirtyEventListener() {
       }
     };
 
+    const restoreCurWorkflow = async () => {
+      if (!app?.graph) {
+        console.error(
+          "🦄 Error in workspace manager! app.graph is not available in restoreCurWorkflow()",
+        );
+        return;
+      }
+      const id = app.graph.extra?.[COMFYSPACE_TRACKING_FIELD_NAME]?.id;
+      if (id) {
+        const flow = await workflowsTable?.get(id);
+        flow && setCurFlowIDAndName(flow);
+
+        if (
+          !flow?.saveLock &&
+          flow &&
+          flow.json !== JSON.stringify(app.graph.serialize())
+        ) {
+          setIsDirty(true);
+        }
+      }
+    };
+
     const originalOnConfigure = app.graph.onConfigure;
     app.graph.onConfigure = function () {
       originalOnConfigure?.apply(this, arguments);
@@ -90,41 +105,11 @@ export default function AppIsDirtyEventListener() {
     });
     document.addEventListener("keydown", keydownListener);
 
-    if (
-      userSettingsTable?.settings?.autoSave &&
-      userSettingsTable.settings.autoSaveDuration
-    ) {
-      autoSaveTimer.current = setInterval(() => {
-        // auto save workflow every 5s
-        autoSaveWorkflow();
-      }, userSettingsTable.settings.autoSaveDuration * 1000);
-    }
-
+    restoreCurWorkflow();
     return () => {
       document.removeEventListener("keydown", keydownListener);
-      autoSaveTimer.current && clearInterval(autoSaveTimer.current);
     };
   }, []);
-  const autoSaveWorkflow = async () => {
-    // autosave workflow if enabled
-    if (
-      workflowsTable?.curWorkflow?.saveLock ||
-      !workflowsTable?.curWorkflow?.id ||
-      !isDirtRef.current
-    ) {
-      return;
-    }
-    const graphJson = JSON.stringify(app.graph.serialize());
-    await workflowsTable?.updateFlow(workflowsTable.curWorkflow.id, {
-      json: graphJson,
-    });
-    changelogsTable?.create({
-      workflowID: workflowsTable.curWorkflow.id,
-      isAutoSave: true,
-      json: graphJson,
-    });
-    setIsDirty(false);
-  };
 
   const onIsDirty = async () => {
     if (workflowsTable?.curWorkflow?.saveLock || isDirtRef.current) return;
@@ -133,22 +118,8 @@ export default function AppIsDirtyEventListener() {
       return;
     }
     setIsDirty(true);
-    if (
-      userSettingsTable?.settings?.autoSave &&
-      workflowsTable?.curWorkflow?.id &&
-      !isOutdated
-    ) {
-      const isLatest = await workflowsTable?.latestVersionCheck();
-      if (!isLatest) {
-        setIsOutdated(true);
-      }
-    }
   };
   const [debounceOnIsDirty, _] = useDebounceFn(onIsDirty, 900);
 
-  return isOutdated ? (
-    <Tooltip label="This workflow was changed by another tab, so you are not working on the latest version. Please refresh page to see the latest version of this workflow.">
-      <Tag colorScheme="yellow">⚠️Outdated version</Tag>
-    </Tooltip>
-  ) : null;
+  return null;
 }

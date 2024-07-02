@@ -12,16 +12,21 @@ import {
   IconCopy,
   IconDotsVertical,
   IconExternalLink,
+  IconLink,
   IconLock,
   IconLockOpen,
   IconUpload,
 } from "@tabler/icons-react";
-import AddTagToWorkflowPopover from "./AddTagToWorkflowPopover";
 import { Workflow } from "../types/dbTypes";
-import { mediaTable, workflowsTable } from "../db-tables/WorkspaceDB";
+import {
+  mediaTable,
+  userSettingsTable,
+  workflowsTable,
+} from "../db-tables/WorkspaceDB";
 import { WorkspaceContext } from "../WorkspaceContext";
 import { openWorkflowInNewTab } from "../utils";
 import { fetchApi } from "../Api";
+import CopyShareLinkMenuItem from "../components/CopyShareLinkMenuItem";
 
 type Props = {
   workflow: Workflow;
@@ -115,6 +120,7 @@ export default function MoreActionMenu({ workflow }: Props) {
               {isLocked ? "Unlock" : "Lock"}
             </MenuItem>
           </Tooltip>
+          <CopyShareLinkMenuItem curFlow={workflow} />
           <MenuItem
             icon={<IconUpload />}
             onClick={() => {

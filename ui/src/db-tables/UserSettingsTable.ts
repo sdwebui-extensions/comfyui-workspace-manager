@@ -1,27 +1,17 @@
 import type { UserSettings } from "../types/dbTypes";
 import { TableBase } from "./TableBase";
 import { MODEL_TYPE_TO_FOLDER_MAPPING } from "../model-manager/install-models/util/modelTypes";
-import { fetchMyWorkflowsDir } from "../Api";
+import { fetchApi, fetchMyWorkflowsDir } from "../Api";
 
 export class UserSettingsTable extends TableBase<UserSettings> {
   public defaultSettings: UserSettings;
   public readonly DEFAULT_USER = "guest";
   static readonly TABLE_NAME = "userSettings";
 
-  /**
-   * Because in App.js we will use window.addEventListener("beforeunload", handleBeforeUnload); to remind the user to save the workflow when the user leaves the page.
-   * The autoSave needs to be obtained in the handleBeforeUnload function. If it is obtained through getSetting, the handleBeforeUnload function will become an async function, which will cause the "beforeunload" event to fail.
-   * So we maintain an autoSave here that is always up to date.
-   */
-  private _autoSave: boolean = false;
   private _settings: UserSettings | undefined = undefined;
 
   get settings() {
     return this._settings;
-  }
-
-  get autoSave() {
-    return this._autoSave;
   }
 
   constructor() {
@@ -43,8 +33,7 @@ export class UserSettingsTable extends TableBase<UserSettings> {
       autoSaveDuration: 3,
       twoWaySync: false,
       foldersOnTop: false,
-      cloudHost: "https://www.nodecafe.org",
-      overwriteCurWorkflowWhenDroppingFileToCanvas: false,
+      cloudHost: "https://www.nodecafe.co",
       maximumChangelogNumber: 80,
       hideCoverImage: false,
       disableUnsavedWarning: false,
@@ -74,6 +63,13 @@ export class UserSettingsTable extends TableBase<UserSettings> {
       ...newPairs,
     };
     await this.put(newSettings);
+    await fetchApi("/workspace/save_settings", {
+      method: "POST",
+      body: JSON.stringify(this._settings),
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
     this._settings = {
       ...this.defaultSettings,
       ...newSettings,
@@ -87,13 +83,15 @@ export class UserSettingsTable extends TableBase<UserSettings> {
     instance.defaultSettings.myWorkflowsDir = myWorkflowsDir.path!;
 
     await instance.get(instance.DEFAULT_USER).then((res) => {
-      instance._autoSave = res?.autoSave ?? false;
       instance._settings = {
         ...instance.defaultSettings,
         ...res,
       };
     });
-    if (instance.defaultSettings.cloudHost.includes("comfyspace.art")) {
+    if (
+      instance._settings?.cloudHost?.includes("nodecafe.org") ||
+      instance._settings?.cloudHost?.includes("comfyspace.art")
+    ) {
       // overwrite legacy comfyspace.art
       await instance.upsert({
         cloudHost: instance.defaultSettings.cloudHost,

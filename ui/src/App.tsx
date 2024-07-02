@@ -25,18 +25,16 @@ const RecentFilesDrawer = React.lazy(
 );
 const GalleryModal = React.lazy(() => import("./gallery/GalleryModal"));
 import { IconExternalLink } from "@tabler/icons-react";
-import {
-  COMFYSPACE_TRACKING_FIELD_NAME,
-  DRAWER_Z_INDEX,
-  UPGRADE_TO_2WAY_SYNC_KEY,
-} from "./const";
+import { DRAWER_Z_INDEX, UPGRADE_TO_2WAY_SYNC_KEY } from "./const";
 import ServerEventListener from "./model-manager/hooks/ServerEventListener";
-import { WorkspaceRoute } from "./types/types";
+import { Session, WorkspaceRoute } from "./types/types";
 import { useStateRef } from "./customHooks/useStateRef";
 import { indexdb } from "./db-tables/indexdb";
 import EnableTwowaySyncConfirm from "./settings/EnableTwowaySyncConfirm";
 import { api, app } from "./utils/comfyapp";
 import { fetchApi } from "./Api";
+import { serverInfo } from "./utils/OsPathUtils";
+import { decodeKey } from "./utils/encryptUtils";
 
 export default function App() {
   const [curFlowName, setCurFlowName] = useState<string | null>(null);
@@ -44,7 +42,7 @@ export default function App() {
   const [loadingDB, setLoadingDB] = useState(true);
   const [flowID, setFlowID] = useState<string | null>(null);
   const curFlowID = useRef<string | null>(null);
-
+  const [session, setSession] = useState<Session | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const workspaceContainerRef = useRef(null);
   const { showDialog } = useDialog();
@@ -74,22 +72,11 @@ export default function App() {
           isAutoSave: false,
         }),
       ]);
-      userSettingsTable?.settings?.autoSave &&
-        toast({
-          title: "Saved",
-          status: "success",
-          duration: 1000,
-          isClosable: true,
-        });
       setIsDirty(false);
     }
   }, []);
 
   const discardUnsavedChanges = async () => {
-    if (userSettingsTable?.settings?.autoSave) {
-      alert("You cannot discard unsaved changes when auto save is enabled");
-      return;
-    }
     const userInput = confirm(
       "Are you sure you want to discard unsaved changes? This will revert current workflow to your last saved version. You will lose all changes made since your last save.",
     );
@@ -149,65 +136,66 @@ export default function App() {
     setLoadingDB(false);
 
     const urlWorkflowID = getWorkflowIdInUrlHash();
-    if (urlWorkflowID == null) {
-      const latestWf = localStorage.getItem("workflow");
-      if (latestWf) {
-        const workflow = JSON.parse(latestWf);
-        const id = workflow.extra?.[COMFYSPACE_TRACKING_FIELD_NAME]?.id;
-        if (id) {
-          const flow = await workflowsTable?.get(id);
-          flow && setCurFlowIDAndName(flow);
-          if (flow && flow.json != latestWf) {
-            setIsDirty(true);
-          }
-        }
-      }
-    } else {
+    if (urlWorkflowID != null) {
       loadWorkflowIDImpl(urlWorkflowID);
     }
     fetchApi("/workspace/deduplicate_workflow_ids");
-    const twoway = await userSettingsTable?.getSetting("twoWaySync");
-    !twoway &&
-      indexdb.cache.get(UPGRADE_TO_2WAY_SYNC_KEY).then(async (value) => {
-        if (value?.value !== "true") {
-          const workflowsCount = await indexdb.workflows.count();
-          if (workflowsCount == 0) {
-            // empty workflows, enable 2way sync
-            await userSettingsTable?.upsert({ twoWaySync: true });
-            await indexdb.cache.put({
-              id: UPGRADE_TO_2WAY_SYNC_KEY,
-              value: "true",
-            });
-            return;
-          }
-          const myWorkflowsDir =
-            await userSettingsTable?.getSetting("myWorkflowsDir");
-          showDialog(
-            <EnableTwowaySyncConfirm
-              myWorkflowsDir={myWorkflowsDir ?? "undefined"}
-            />,
-            [
-              {
-                label: "I have downloaded all my workflows and ready to enable",
-                onClick: async () => {
-                  await userSettingsTable?.upsert({ twoWaySync: true });
-                  if (await userSettingsTable?.getSetting("twoWaySync")) {
-                    indexdb.cache.put({
-                      id: UPGRADE_TO_2WAY_SYNC_KEY,
-                      value: "true",
-                    });
-                    location.reload();
-                  }
-                },
-                colorScheme: "red",
-              },
-            ],
-            {
-              closeOnOverlayClick: false,
-            },
-          );
+    fetchApi("/workspace/get_os")
+      .then((resp) => resp.json())
+      .then((data) => {
+        if (data.os) {
+          serverInfo.os = data.os;
         }
       });
+    const twoway = await userSettingsTable?.getSetting("twoWaySync");
+
+    if (!twoway) {
+      const workflowsCount = await indexdb.workflows.count();
+      if (workflowsCount == 0) {
+        // empty workflows, enable 2way sync
+        await userSettingsTable?.upsert({ twoWaySync: true });
+        await indexdb.cache.put({
+          id: UPGRADE_TO_2WAY_SYNC_KEY,
+          value: "true",
+        });
+        return;
+      }
+      const myWorkflowsDir =
+        await userSettingsTable?.getSetting("myWorkflowsDir");
+      showDialog(
+        <EnableTwowaySyncConfirm
+          myWorkflowsDir={myWorkflowsDir ?? "undefined"}
+        />,
+        [
+          {
+            label: "I have downloaded all my workflows and ready to enable",
+            onClick: async () => {
+              await userSettingsTable?.upsert({ twoWaySync: true });
+              if (await userSettingsTable?.getSetting("twoWaySync")) {
+                indexdb.cache.put({
+                  id: UPGRADE_TO_2WAY_SYNC_KEY,
+                  value: "true",
+                });
+                location.reload();
+              }
+            },
+            colorScheme: "red",
+          },
+        ],
+        {
+          closeOnOverlayClick: false,
+        },
+      );
+    }
+    const encodedKey = localStorage.getItem("workspace_manager_shareKey");
+    if (encodedKey) {
+      const shareKey = decodeKey(encodedKey);
+      shareKey &&
+        setSession({
+          shareKey: shareKey,
+          username: null,
+        });
+    }
   };
 
   const loadWorkflowIDImpl = async (id: string, versionID?: string | null) => {
@@ -256,8 +244,8 @@ export default function App() {
     if (
       !isDirty ||
       forceLoad ||
-      userSettingsTable?.settings?.autoSave ||
-      workflowsTable?.curWorkflow == null
+      workflowsTable?.curWorkflow == null ||
+      userSettingsTable?.settings?.disableUnsavedWarning
     ) {
       loadWorkflowIDImpl(id, versionID);
       return;
@@ -339,7 +327,6 @@ export default function App() {
       json: workflow.json,
       name: newFlowName || workflow.name,
       parentFolderID: workflow.parentFolderID,
-      tags: workflow.tags,
     });
     flow && (await loadWorkflowID(flow.id));
   };
@@ -421,6 +408,8 @@ export default function App() {
         curVersion: curVersion,
         setCurVersion: setCurVersion,
         setCurFlowIDAndName: setCurFlowIDAndName,
+        session: session,
+        updateSession: setSession,
       }}
     >
       <div ref={workspaceContainerRef} className="workspace_manager">

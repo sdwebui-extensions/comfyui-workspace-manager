@@ -10,7 +10,6 @@ import {
   ModalContent,
   ModalHeader,
   ModalOverlay,
-  Radio,
   RadioGroup,
   Stack,
   Switch,
@@ -18,37 +17,50 @@ import {
   Text,
   useToast,
 } from "@chakra-ui/react";
-import { WorkflowPrivacy, WorkflowVersion } from "../types/dbTypes";
-import { useEffect, useRef, useState } from "react";
+import {
+  EWorkflowPrivacy,
+  WorkflowPrivacy,
+  WorkflowVersion,
+} from "../types/dbTypes";
+import { useContext, useEffect, useState } from "react";
 import CustomSelector from "../components/CustomSelector";
 import { IconCopy, IconExternalLink } from "@tabler/icons-react";
-import {
-  userSettingsTable,
-  workflowVersionsTable,
-  workflowsTable,
-} from "../db-tables/WorkspaceDB";
+import { userSettingsTable, workflowsTable } from "../db-tables/WorkspaceDB";
 // @ts-ignore
 import { api } from "/scripts/api.js";
 import {
   PrivacyLabel,
   fetchCloudWorkflowPrivacy,
   generateRandomKey,
+  getCurDateString,
   getNodeDefs,
   privacyOptions,
 } from "./shareUtils";
 
-import ShareDialogWorkflowVersionRadio from "./ShareDialogWorkflowVersionRadio";
 import ResourceDepsForm from "../spacejson/ResourceDepsForm";
 import { app } from "../utils/comfyapp";
 import { useStateRef } from "../customHooks/useStateRef";
+import { WorkspaceContext } from "../WorkspaceContext";
+import {
+  DepsResult,
+  WorkspaceInfoDeps,
+  extractAndFetchFileNames,
+} from "../spacejson/handleDownloadSpaceJson";
+import { fetchApi } from "../Api";
+import { COMFYSPACE_TRACKING_FIELD_NAME } from "../const";
+import { ShareWorkflowData } from "../types/types";
 
 interface Props {
   onClose: () => void;
 }
 
 export default function ShareDialog({ onClose }: Props) {
-  const [versionName, setVersionName] = useState("v" + getCurDateString());
-  const [localVersions, setLocalVersions] = useState<WorkflowVersion[]>([]);
+  const [versionName, setVersionName, versionNameRef] = useStateRef(
+    "v" + getCurDateString(),
+  );
+  const { saveCurWorkflow } = useContext(WorkspaceContext);
+  const [deps, setDeps] = useState<DepsResult>();
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [loading, setLoading] = useState(false);
   const cloudHost = userSettingsTable?.settings?.cloudHost;
   const [privacy, setPrivacy, privacyRef] =
@@ -56,79 +68,52 @@ export default function ShareDialog({ onClose }: Props) {
   const [selectedVersion, setSelectedVersion] = useState<
     string | "new_version"
   >("new_version");
-  const cloudHostRef = useRef("");
   const workflow = workflowsTable?.curWorkflow;
   const toast = useToast();
-  const formRef = useRef<HTMLFormElement>(null);
   const [enableDeps, setEnableDeps] = useState(true);
   const handleShareWorkflowSuccess = async (event: MessageEvent) => {
     const detail = event.data;
     if (
       // event.origin !== cloudHostRef.current ||
-      detail.type !== "share_workflow_success"
+      detail.type !== "share_workflow_success" ||
+      !workflow
     ) {
       return;
     }
 
-    const localID = detail.localWorkflowID;
-    const localVerID = detail.localVersionID;
     const cloudVersionID = detail.version.id;
     const cloudID = detail.version.workflowID;
 
     cloudID &&
-      localID &&
-      (await workflowsTable?.updateMetaInfo(localID, {
+      (await workflowsTable?.updateMetaInfo(workflow.id, {
         cloudID: cloudID,
-        cloudOrigin: event.origin,
-        privacy: privacyRef.current,
       }));
-    localVerID &&
-      cloudVersionID &&
-      (await workflowVersionsTable?.update(localVerID, {
-        cloudID: cloudVersionID,
-        cloudOrigin: event.origin,
-      }));
+
     loadData();
     window.open(
-      cloudHostRef.current + "/workflow/" + cloudID + "/" + cloudVersionID,
+      cloudHost + "/workflow/" + cloudID + "/" + cloudVersionID,
       "_blank",
     );
     setLoading(false);
   };
   useEffect(() => {
     loadData();
+    const graph = app.graph.serialize();
+    extractAndFetchFileNames(graph.nodes ?? []).then((depsRes) => {
+      setDeps(depsRes);
+    });
     window.addEventListener("message", handleShareWorkflowSuccess);
-    const shareDepsToCloud = (event: any) => {
-      if (event.detail) {
-        pushToCloud(event.detail ? JSON.stringify(event.detail) : undefined);
-      }
-    };
-    window.addEventListener("workspace_info_deps_updated", shareDepsToCloud);
     return () => {
       window.removeEventListener("message", handleShareWorkflowSuccess);
-      window.removeEventListener(
-        "workspace_info_deps_updated",
-        shareDepsToCloud,
-      );
     };
   }, []);
 
   const loadData = async () => {
-    const host =
-      import.meta.env.MODE === "production"
-        ? await userSettingsTable?.getSetting("cloudHost")
-        : "http://localhost:3000";
-    if (host) {
-      cloudHostRef.current = host;
-    }
     if (workflow?.cloudID && workflow.cloudOrigin) {
       fetchCloudWorkflowPrivacy(workflow).then((privacy) => {
         setPrivacy(privacy);
       });
     }
-    workflowVersionsTable?.listByWorkflowID(workflow!.id).then((vers) => {
-      setLocalVersions(vers);
-    });
   };
   const copyTextToClipboard = (text: string) => {
     navigator.clipboard
@@ -145,7 +130,24 @@ export default function ShareDialog({ onClose }: Props) {
         console.error("Failed to copy text: ", err);
       });
   };
-  const pushToCloud = async (jsonToShare?: string) => {
+  const pushToCloud = async (imageDeps?: DepsResult["images"]) => {
+    const graph = app.graph.serialize();
+    (graph.extra ||= {})[COMFYSPACE_TRACKING_FIELD_NAME] ||= {};
+    graph.extra[COMFYSPACE_TRACKING_FIELD_NAME].deps = {
+      models: deps?.models ?? {},
+      images: imageDeps ?? {},
+      nodeRepos: deps?.nodeRepos ?? [],
+    } as WorkspaceInfoDeps;
+
+    await saveCurWorkflow();
+
+    await app
+      .graphToPrompt(app.graph)
+      .then((data: { output: any; workflow: any }) => {
+        graph.extra[COMFYSPACE_TRACKING_FIELD_NAME].apiPrompt = data.output;
+        return data.output;
+      });
+    const jsonToShare = JSON.stringify(graph);
     setLoading(true);
     const secretKey = generateRandomKey(32);
     const host =
@@ -153,30 +155,11 @@ export default function ShareDialog({ onClose }: Props) {
         ? ((await userSettingsTable?.getSetting("cloudHost")) as string)
         : "http://localhost:3000";
     let nodeDefs: Object;
-    let version: WorkflowVersion | undefined;
-    try {
-      nodeDefs = getNodeDefs();
-      if (selectedVersion === "new_version") {
-        version = await workflowVersionsTable?.add({
-          workflowID: workflow!.id,
-          name: versionName,
-          createTime: Date.now(),
-          json: jsonToShare ?? JSON.stringify(app.graph.serialize()),
-        });
-      } else {
-        version = await workflowVersionsTable?.get(selectedVersion);
-      }
-      if (!version) {
-        alert(`Failed to find version: ${selectedVersion}, please try again.`);
-        setLoading(false);
-        return;
-      }
-    } catch (e) {
-      console.error(e);
-      setLoading(false);
-      alert("Failed to share workflow, please try again.");
-      return;
-    }
+    nodeDefs = getNodeDefs();
+    const version: Omit<WorkflowVersion, "id" | "workflowID" | "createTime"> = {
+      name: versionNameRef.current,
+      json: jsonToShare ?? JSON.stringify(app.graph.serialize()),
+    };
     const protocol = window.location.protocol;
     const baseHost = window.location.host;
     const baseUrl = `${protocol}//${baseHost}`;
@@ -190,27 +173,59 @@ export default function ShareDialog({ onClose }: Props) {
     const handleChildReady = (event: MessageEvent) => {
       if (event.origin === host && event.data === "child_ready") {
         const curWorkflow = workflowsTable?.curWorkflow;
-        // Send data to the new window after it loads
-        sharePopup!.postMessage(
-          {
-            workflow: curWorkflow,
-            version: version,
-            nodeDefs: nodeDefs,
-            privacy: privacyRef.current,
+        if (!curWorkflow) {
+          return;
+        }
+        const input: ShareWorkflowData = {
+          workflow: {
+            name: curWorkflow.name,
+            cloudID: curWorkflow.cloudID,
           },
-          host,
-        );
+          version: {
+            name: versionNameRef.current,
+            json: jsonToShare,
+          },
+          nodeDefs: nodeDefs,
+          privacy: privacyRef.current as EWorkflowPrivacy,
+        };
+        // Send data to the new window after it loads
+        sharePopup!.postMessage(input, host);
         window.removeEventListener("message", handleChildReady);
       }
     };
     window.addEventListener("message", handleChildReady);
   };
+
   const onShare = async () => {
+    const imageDeps = deps?.images ?? {};
     if (enableDeps) {
-      formRef.current?.requestSubmit();
-    } else {
-      pushToCloud();
+      // upload images
+      setUploadingImage(true);
+      const imageDepsToUpload = Object.values(deps?.images ?? {})
+        // .filter((i) => !i.url)
+        .map((i) => i.filename);
+      if (imageDepsToUpload.length) {
+        try {
+          const uploadResp = await fetchApi("/workspace/upload_image", {
+            method: "POST",
+            body: JSON.stringify({
+              images: imageDepsToUpload,
+            }),
+          });
+          const json = (await uploadResp.json()) as Record<string, string>;
+          Object.keys(json).forEach((key) => {
+            if (imageDeps?.[key]) {
+              imageDeps[key].url = json[key];
+            }
+          });
+        } catch (error) {
+          console.error("Error uploading images:", error);
+        }
+      }
+      setUploadingImage(false);
     }
+
+    pushToCloud(imageDeps);
   };
 
   const cloudWorkflowID = workflowsTable?.curWorkflow?.cloudID;
@@ -284,7 +299,6 @@ export default function ShareDialog({ onClose }: Props) {
                 </Button>
               </HStack>
             )}
-            {/* <Text>Choose a version to share:</Text> */}
             <RadioGroup
               gap={4}
               onChange={(val) => {
@@ -294,7 +308,6 @@ export default function ShareDialog({ onClose }: Props) {
             >
               <Stack>
                 <HStack mb={5} alignItems={"center"}>
-                  {/* <Radio key={"new_version"} value="new_version" /> */}
                   <Input
                     value={versionName}
                     width={"60%"}
@@ -309,49 +322,34 @@ export default function ShareDialog({ onClose }: Props) {
                     <Badge colorScheme="purple">Version Name</Badge>
                   </Flex>
                 </HStack>
-
-                {/* {localVersions.slice(0, 4).map((ver) => {
-                  return (
-                    <ShareDialogWorkflowVersionRadio
-                      key={ver.id}
-                      version={ver}
-                      cloudHost={cloudHost}
-                      cloudWorkflowID={cloudWorkflowID ?? null}
-                    />
-                  );
-                })} */}
               </Stack>
             </RadioGroup>
-            <Stack borderRadius={6} borderWidth={"1px"} p={2}>
-              <Switch
-                isChecked={enableDeps}
-                onChange={() => setEnableDeps(!enableDeps)}
-                fontWeight={"600"}
-              >
-                Share Resource Links
-              </Switch>
-              {enableDeps && (
-                <>
-                  <span style={{ color: "GrayText" }}>
-                    You can disable reource sharing if you don't want to resolve
-                    submit errors
-                  </span>
-                  <ResourceDepsForm ref={formRef} />
-                </>
-              )}
-            </Stack>
+            {Object.keys(deps?.images ?? {}).length > 0 && (
+              <Stack borderRadius={6} borderWidth={"1px"} p={2}>
+                <Switch
+                  isChecked={enableDeps}
+                  onChange={() => setEnableDeps(!enableDeps)}
+                  fontWeight={"600"}
+                >
+                  Share input images
+                </Switch>
+
+                <span style={{ color: "GrayText" }}>
+                  If enabled your input images will be uploaded and shared to{" "}
+                  {cloudHost}
+                </span>
+                {enableDeps && (
+                  <ResourceDepsForm
+                    deps={deps ?? null}
+                    setDeps={setDeps}
+                    uploadingImage={uploadingImage}
+                  />
+                )}
+              </Stack>
+            )}
           </Stack>
         </ModalBody>
       </ModalContent>
     </Modal>
   );
-}
-
-function getCurDateString() {
-  const currentDate = new Date();
-  const year = currentDate.getFullYear();
-  const month = String(currentDate.getMonth() + 1).padStart(2, "0"); // Months are 0-based in JS
-  const day = String(currentDate.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
 }

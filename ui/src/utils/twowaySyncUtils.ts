@@ -4,7 +4,7 @@ import {
   ScanLocalFolder,
   scanLocalFiles,
 } from "../apis/TwowaySyncApi";
-import { isFolder, userSettingsTable } from "../db-tables/WorkspaceDB";
+import { isFolder } from "../db-tables/WorkspaceDB";
 import { indexdb } from "../db-tables/indexdb";
 import { Folder, Workflow } from "../types/dbTypes";
 import { sortFileItem } from "../utils";
@@ -34,12 +34,23 @@ export async function scanMyWorkflowsDir(
       return folder;
     } else {
       // is workflow
-      const existingWorkflow = (await indexdb.workflows?.get(file.id)) ?? {
-        createTime: Date.now(),
-        updateTime: Date.now(),
-      };
+
+      const existingWorkflow = await indexdb.workflows
+        ?.get(file.id)
+        .catch((err) => {
+          console.error(
+            "Error getting workflow from indexdb",
+            file.id,
+            relPath,
+            err,
+          );
+          return null;
+        });
 
       const newWorkflow: Workflow = {
+        cloudID: file.cloudID,
+        coverMediaPath: file.coverMediaPath,
+        saveLock: file.saveLock,
         ...existingWorkflow,
         id: file.id,
         json: file.json ?? "{}",
@@ -48,7 +59,7 @@ export async function scanMyWorkflowsDir(
         createTime: file.createTime,
         // setting updateTime will result latestVersionChcek() always fail if in
         // workflow.get() not pull updateTime from file
-        // updateTime: file.updateTime,
+        updateTime: file.updateTime,
       };
       return newWorkflow;
     }

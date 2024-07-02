@@ -2,11 +2,19 @@
 
 A ComfyUI workflow and model manager extension to **organize and manage all your workflows, models and generated images in one place**. Seamlessly switch between workflows, track version history and image generation history, 1 click install models from Civit ai, browse/update your installed models
 
-If you have questions or suggestions, please [join our Discord](https://discord.gg/HHvfEurv2Z)!
+If you have questions or suggestions, please [join our Discord](https://discord.gg/HHvfEurv2Z)! 
+
+✨We have a new platform to turn your comfyui workflow to runnable web app: www.nodecafe.co please check it out! 🥳
+
+[6-25] ⚠️ Please update workspace manager to latest version if it's not showing up for you after updating ComfyUI
+
+[6-21] ‼️please upgrade to V2 and enable twoway sync if you haven't already. I will stop supporting V1 soon and will forcefully turn on twoway sync later. (twoway sync means that your workflow are twoway synced with your disk files /my_workflows directly)
+
+[6-21] ‼️ Auto-save mode will be removed comopoletely from next version. Because there are reports that autosave mode sometimes overwrite workflows mistakenly. Therefore, please **manual save** your workflows always.
 
 [New!] We provide 👭**team workspace** now! If you need to **share workflows, backup workflow versions for enterprise and teams**, please contact me about our team/enterprise product at weixuanfu01@gmail.com or join discord and DM me @briefpeach 
 
-‼️ [3-23-2024]**search and install models from civitai is not working in previous versions**, because civitai changed something in their api. **Please update to the latest version** if you are seeing blank screen in Install Models dialog
+[5-23-2024]**search and install models from civitai is not working in previous versions**, **Please update to the latest version** if you are seeing blank screen in Install Models dialog
 
 <img width="610" alt="Screenshot 2024-03-08 at 6 41 18 PM" src="https://github.com/11cafe/comfyui-workspace-manager/assets/18367033/30455eb1-3d12-4930-bb81-28b33148fbaa">
 
@@ -30,13 +38,12 @@ Please upgrade to V2 asap, you should see an **unicorn🦄** here instead of ☕
 <img width="136" alt="Screenshot 2024-05-31 at 5 39 58 PM" src="https://github.com/11cafe/comfyui-workspace-manager/assets/18367033/f52a83f2-4679-4a40-95ed-e75584516ec5">
 
 Recommanded settings for V2 (Do not use these settings if you are on V1):
- - Enable two way sync (‼️‼️ We will stop supporting non-two-way sync mode starting next version, and everyone should be using two way sync mode)
- - Disable Auto save (‼️‼️ Auto save mode may cause loss of workflow changes, so I plan to stop supporting auto-save mode too. Everyone should be using manual save mode in future)
+ - Enable two way sync (‼️ Will stop supporting non-two-way sync mode starting next version)
  - Make sure My Workspace Save Directory is valid path
 
 <img width="202" alt="Screenshot 2024-05-30 at 6 34 39 PM" src="https://github.com/11cafe/comfyui-workspace-manager/assets/18367033/67020966-c190-48cb-bffc-b715449d5c99">
 
-<img width="377" alt="Screenshot 2024-05-30 at 6 34 35 PM" src="https://github.com/11cafe/comfyui-workspace-manager/assets/18367033/10002a3f-ea2f-4bd1-8597-0ae1443d9851">
+<img width="377" alt="335530039-10002a3f-ea2f-4bd1-8597-0ae1443d9851" src="https://github.com/11cafe/comfyui-workspace-manager/assets/18367033/6001a7f1-93f2-48ef-86c6-95c9560030ef">
 
 
 
@@ -46,7 +53,7 @@ Recommanded settings for V2 (Do not use these settings if you are on V1):
 
 - 🔁Switch between different workflows easily. 1click open workflow in multiple browser tabs.
 - 🤏**Drag and drop** to insert subworkflows into current flow.
-- 🗂️Organize workflows with folders, tags.
+- 🗂️Organize workflows with folders (tags are deprecated, please use folders to organize)
 - 📂Save and sync all your workflows in a local folder (by default under `/ComfyUI/my_workflows` customize in Settings)
   - **Save workflow by pressing the 💾 button, or ⌨Shift+S shortcut** (customize in Settings).
   - Every time you save, it will create a new record in **Version History**. You can easily revert to any version.
@@ -73,13 +80,6 @@ Recommend using Chrome browser for the best experience. Safari doesn't work well
 [中文版教程](https://www.uisdc.com/workspace-manager) &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [Roadmap](https://github.com/orgs/11cafe/projects/1/views/1)
 
 ## Updates
-**🦩v2.1 New gallery! Inspect image metadata, search image by prompt, model/lora used**
-
-<img width="700" alt="Screenshot 2024-03-23 at 12 58 38 AM" src="https://github.com/11cafe/comfyui-workspace-manager/assets/18367033/5bac9793-7491-4131-b850-037094d03823">
-
-Control+P quick spotlight search (like VSCode)
-
-<img width="500" alt="Screenshot 2024-03-27 at 3 49 35 PM" src="https://github.com/11cafe/comfyui-workspace-manager/assets/18367033/47c14904-180c-4c52-a644-223d0936c9fa">
 
 **🦄v2.0 Two-way sync with local folder, models manager support external models path like Automatic1111, cloud sync workflows**
   

@@ -2,6 +2,7 @@ import { IconLink, IconLock, IconWorld } from "@tabler/icons-react";
 import { CustomSelectorOption } from "../components/CustomSelector";
 import { Workflow, WorkflowPrivacy } from "../types/dbTypes";
 import { app } from "../utils/comfyapp";
+import { userSettingsTable } from "../db-tables/WorkspaceDB";
 
 export function generateRandomKey(length: number) {
   // Generate a random array of bytes
@@ -60,10 +61,7 @@ export const getNodeDefs = () => {
 export async function fetchCloudWorkflowPrivacy(
   workflow: Workflow,
 ): Promise<WorkflowPrivacy> {
-  const cloudOrigin = workflow.cloudOrigin;
-  if (!cloudOrigin) {
-    throw Error("cloudURL is required");
-  }
+  const cloudOrigin = userSettingsTable?.settings?.cloudHost;
   return fetch(cloudOrigin + `/api/getWorkflow?id=${workflow.cloudID}`)
     .then((res) => res.json())
     .then((json) => {
@@ -98,4 +96,13 @@ export function PrivacyLabel({
     }
   }
   return <span>{text}</span>;
+}
+
+export function getCurDateString() {
+  const currentDate = new Date();
+  // const year = currentDate.getFullYear();
+  const month = String(currentDate.getMonth() + 1).padStart(2, "0"); // Months are 0-based in JS
+  const day = String(currentDate.getDate()).padStart(2, "0");
+
+  return `${month}-${day}`;
 }

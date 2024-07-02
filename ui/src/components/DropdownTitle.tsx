@@ -26,6 +26,7 @@ import {
   DarkMode,
   Tag,
   HStack,
+  useToast,
 } from "@chakra-ui/react";
 import {
   IconArrowBackUpDouble,
@@ -44,10 +45,10 @@ import CreateVersionDialog from "./CreateVersionDialog";
 import HoverMenu from "./HoverMenu";
 const ShareDialog = lazy(() => import("../share/ShareDialog"));
 import { TOPBAR_BUTTON_HEIGHT } from "../const";
-import DownloadSpaceJsonDialog from "../spacejson/DownloadSpaceJsonDialog";
 import { downloadJsonFile } from "../utils/downloadJsonFile";
 import { SharedTopbarButton } from "../share/SharedTopbarButton";
 import { app } from "../utils/comfyapp";
+import CopyShareLinkMenuItem from "./CopyShareLinkMenuItem";
 
 export default function DropdownTitle() {
   const {
@@ -57,6 +58,7 @@ export default function DropdownTitle() {
     saveCurWorkflow,
     setRoute,
     route,
+    session,
   } = useContext(WorkspaceContext);
 
   const [isOpenNewVersion, setIsOpenNewVersion] = useState(false);
@@ -84,7 +86,7 @@ export default function DropdownTitle() {
     setNewFlowName(event.target.value);
     submitError && setSubmitError("");
   };
-
+  const toast = useToast();
   const onSubmit = async () => {
     if (!curFlowID) {
       alert("Flow ID is required");
@@ -146,17 +148,15 @@ export default function DropdownTitle() {
               >
                 Save
               </MenuItem>
-              {!userSettingsTable?.settings?.autoSave && (
-                <Tooltip label="Revert workflow to your last saved version. You will lose all changes made since your last save.">
-                  <MenuItem
-                    onClick={discardUnsavedChanges}
-                    icon={<IconArrowBackUpDouble size={20} />}
-                    iconSpacing={1}
-                  >
-                    Discard unsaved changes
-                  </MenuItem>
-                </Tooltip>
-              )}
+              <Tooltip label="Revert workflow to your last saved version. You will lose all changes made since your last save.">
+                <MenuItem
+                  onClick={discardUnsavedChanges}
+                  icon={<IconArrowBackUpDouble size={20} />}
+                  iconSpacing={1}
+                >
+                  Discard unsaved changes
+                </MenuItem>
+              </Tooltip>
               <MenuItem
                 onClick={handleDownload}
                 icon={<IconDownload size={20} />}
@@ -186,13 +186,6 @@ export default function DropdownTitle() {
               >
                 Versions History
               </MenuItem>
-              {/* <MenuItem
-                onClick={() => setRoute("downloadSpaceJson")}
-                icon={<IconDownload size={20} />}
-                iconSpacing={1}
-              >
-                Save runnable workflow🧪
-              </MenuItem> */}
               <MenuItem
                 onClick={() => setRoute("share")}
                 icon={<IconShare2 size={20} />}
@@ -204,6 +197,9 @@ export default function DropdownTitle() {
                   <SharedTopbarButton />
                 </HStack>
               </MenuItem>
+              {workflowsTable?.curWorkflow && (
+                <CopyShareLinkMenuItem curFlow={workflowsTable?.curWorkflow} />
+              )}
             </MenuList>
           </Menu>
         }
@@ -212,7 +208,6 @@ export default function DropdownTitle() {
       {route == "versionHistory" && (
         <VersionHistoryDrawer onClose={() => setRoute("root")} />
       )}
-      {route == "downloadSpaceJson" && <DownloadSpaceJsonDialog />}
       {route === "saveAsModal" && (
         <Modal isOpen={true} onClose={handleOnCloseModal}>
           <ModalOverlay />

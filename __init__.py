@@ -5,25 +5,28 @@ import folder_paths
 import shutil
 import os
 import sys
-import subprocess  # don't remove this
-from urllib.parse import urlparse
+import subprocess 
 import subprocess
 import os
 import json
-from .service.model_manager.model_installer import download_url_with_wget
-from .service.model_manager.model_list import get_model_list
 from .service.media_service import *
 from .service.file_sync_service import *
 from .service.db_service import get_my_workflows_dir
 from comfy.cli_args import args
 from .service.node_service import *
+from .service.setting_service import *
+from .service.model_manager.model_installer import *
+try:
+    from send2trash import send2trash
+except ImportError:
+    send2trash = None
 
 WEB_DIRECTORY = "entry"
 NODE_CLASS_MAPPINGS = {}
 __all__ = ['NODE_CLASS_MAPPINGS']
-version = "V1.0.0"
+version = "V2.1.0"
 
-print(f"### Loading: Workspace Manager ({version})")
+print(f"🦄🦄Loading: Workspace Manager ({version})")
 workspace_path = os.path.join(os.path.dirname(__file__))
 comfy_path = os.path.dirname(folder_paths.__file__)
 db_dir_path = os.path.join(args.data_dir, "models/db")
@@ -33,39 +36,8 @@ if os.path.exists(dist_path):
     server.PromptServer.instance.app.add_routes([
         web.static('/workspace_web/', dist_path),
     ])
-
-BACKUP_DIR = os.path.join(workspace_path, "backup")
-MAX_BACKUP_FILES = 20
-
-@server.PromptServer.instance.routes.post("/workspace/list_backup")
-async def list_backup(request):
-    try:
-        data = await request.json()
-        dir_path = os.path.join(BACKUP_DIR, data.get('dir'))
-        # List all files in the directory
-        files = os.listdir(dir_path)
-
-        # Filter out .json files and sort them by filename (which starts with Unix timestamp)
-        json_files = sorted(
-            [file for file in files if file.endswith('.json')],
-            key=lambda x: x,  # Assuming the format is 'timestamp_filename.json'
-            reverse=True
-        )
-
-        # Select the 10 most recent files
-        recent_json_files = json_files[:10]
-
-        # Read the contents of each JSON file
-        file_contents = []
-        for file in recent_json_files:
-            with open(os.path.join(dir_path, file), 'r') as f:
-                content = json.load(f)
-                file_contents.append({"fileName": file, "jsonStr": content})
-
-        return web.Response(text=json.dumps(file_contents), content_type='application/json')
-    except Exception as e:
-        return web.Response(text=json.dumps({"error": str(e)}), status=500)
-
+else:
+    print(f"🦄🦄🔴🔴Error: Web directory not found: {dist_path}")
 
 @server.PromptServer.instance.routes.post("/workspace/get_system_dir")
 async def get_system_dir(request):
@@ -113,31 +85,28 @@ async def update_file(request):
     await asyncio.to_thread(write_json_to_file, json_str)
     return web.Response(text="File updated successfully")
 
-
 @server.PromptServer.instance.routes.post("/workspace/delete_file")
 async def delete_file(request):
     data = await request.json()
     file_path = data['file_path']
-    delete_empty_folder = data['deleteEmptyFolder']
 
-    def sync_delete_file(file_path, delete_empty_folder):
+    def sync_delete_file(file_path):
         my_workflows_dir = get_my_workflows_dir()
         full_path = os.path.join(my_workflows_dir, file_path)
 
         if os.path.exists(full_path):
-            os.remove(full_path)
-            directory = os.path.dirname(full_path)
-            if delete_empty_folder and not os.listdir(directory):
-                # If the directory is empty, remove the directory
-                os.rmdir(directory)
-                return "File and empty directory deleted successfully"
+            if send2trash:
+                send2trash(full_path)
             else:
-                return "File deleted successfully"
+                os.remove(full_path)
+                print("❌⛔️send2trash is not available. Deleting file permanently. Please `pip install send2trash`")
+
+            return "File deleted successfully"
         else:
             return "File not found"
 
     # Run the synchronous file operation in a separate thread
-    response_text = await asyncio.to_thread(sync_delete_file, file_path, delete_empty_folder)
+    response_text = await asyncio.to_thread(sync_delete_file, file_path)
     
     if response_text == "File not found":
         return web.Response(text=response_text, status=404)
