@@ -63,4 +63,4 @@ def get_my_workflows_dir():
             os.makedirs(os.path.join(args.data_dir, 'my_workflows'))
         except:
             pass
-    return os.path.join(comfy_path, 'my_workflows')
+    return os.path.join(args.data_dir, 'my_workflows')
