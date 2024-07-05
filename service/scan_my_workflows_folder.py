@@ -24,7 +24,7 @@ async def scan_my_workflows_files(request):
     fileList = []
     if os.path.exists(path):
         fileList = await asyncio.to_thread(folder_handle, path, recursive, metaInfoOnly)
-    else:
+    if (not os.path.exists(path)) or (reqJson['path'] == ''):
         path = os.path.join(get_default_workflows_dir(), reqJson['path'])
         fileList.extend(await asyncio.to_thread(folder_handle, path, recursive, metaInfoOnly))
     return web.Response(text=json.dumps(fileList), content_type='application/json')
