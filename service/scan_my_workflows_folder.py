@@ -8,7 +8,7 @@ import logging
 from threading import Lock
 import server
 import uuid
-from .setting_service import get_my_workflows_dir
+from .setting_service import get_my_workflows_dir, get_default_workflows_dir
 
 @server.PromptServer.instance.routes.get('/workspace/get_os')
 async def scan_my_workflows_files(request):
@@ -23,6 +23,9 @@ async def scan_my_workflows_files(request):
     metaInfoOnly = reqJson.get('metaInfoOnly', False)
     
     fileList = await asyncio.to_thread(folder_handle, path, recursive, metaInfoOnly)
+    path = os.path.join(get_default_workflows_dir(), reqJson['path'])
+    if os.path.exists(path):
+        fileList.extend(await asyncio.to_thread(folder_handle, path, recursive, metaInfoOnly))
     return web.Response(text=json.dumps(fileList), content_type='application/json')
 
 def folder_handle(path, recursive, metaInfoOnly, fileList=None):

@@ -74,6 +74,8 @@ def move_file_sync(reqJson):
     current_path = reqJson.get('path')
     new_path = reqJson.get('newParentPath')
     current_path = os.path.join(get_my_workflows_dir(), current_path)
+    if not os.path.exists(current_path):
+        current_path = os.path.join(get_default_workflows_dir(), reqJson.get('path'))
     new_path = os.path.join(get_my_workflows_dir(), new_path)
     try:
         shutil.move(current_path, new_path)
@@ -121,6 +123,8 @@ def create_workflow_file(reqJson):
 
 def read_workflow_file(path, id):
     abs_path = os.path.join(get_my_workflows_dir(), path)
+    if not os.path.exists(abs_path):
+        abs_path = os.path.join(get_default_workflows_dir(), path)
     create_time, update_time = getFileCreateTime(abs_path)
     with open(abs_path, 'r', encoding='utf-8') as f:
         json_data = json.load(f)
@@ -170,6 +174,15 @@ def dedupe_workflow_ids():
     abs_path = get_my_workflows_dir()
     seen_ids = {}
     for root, dirs, files in os.walk(abs_path):
+        for file in files:
+            if not file.endswith(".json"):
+                continue
+            file_path = os.path.join(root, file)
+            try:
+                check_and_update_workflow_id(file_path, seen_ids)
+            except Exception as e:
+                print(f"Error while processing file {file_path}: {e}")
+    for root, dirs, files in os.walk(get_default_workflows_dir()):
         for file in files:
             if not file.endswith(".json"):
                 continue
@@ -260,7 +273,9 @@ def generate_unique_file_name_sync(reqJson):
 
     path = Path(get_my_workflows_dir()) / file_path
     if not path.parent.is_dir():
-        return {"success": False, "error": "Directory of the provided path does not exist"}
+        path = Path(get_default_workflows_dir()) / file_path
+        if not path.parent.is_dir():
+            return {"success": False, "error": "Directory of the provided path does not exist"}
 
     original_name = path.stem
     extension = path.suffix
@@ -287,7 +302,9 @@ def count_files_sync(reqJson):
 
     path = Path(get_my_workflows_dir()) / directory_path
     if not path.is_dir():
-        return {"success": False, "error": "Provided path is not a directory"}
+        path = Path(get_default_workflows_dir()) / directory_path
+        if not path.is_dir():
+            return {"success": False, "error": "Provided path is not a directory"}
     file_count = 0
     for file in path.rglob('*.json'):  # Only consider .json files
         if file.is_file():

@@ -64,3 +64,7 @@ def get_my_workflows_dir():
         except:
             pass
     return os.path.join(args.data_dir, 'my_workflows')
+
+def get_default_workflows_dir():
+    return "/code/default_workflows"
+

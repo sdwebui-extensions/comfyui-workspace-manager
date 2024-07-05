@@ -4,7 +4,7 @@ from aiohttp import web
 import os
 from pathlib import Path
 import server
-from .setting_service import get_my_workflows_dir
+from .setting_service import get_my_workflows_dir, get_default_workflows_dir
 try:
     from send2trash import send2trash
 except ImportError:
