@@ -21,10 +21,11 @@ async def scan_my_workflows_files(request):
     path = os.path.join(get_my_workflows_dir(), path)
     recursive = reqJson.get('recursive', False)
     metaInfoOnly = reqJson.get('metaInfoOnly', False)
-    
-    fileList = await asyncio.to_thread(folder_handle, path, recursive, metaInfoOnly)
-    path = os.path.join(get_default_workflows_dir(), reqJson['path'])
+    fileList = []
     if os.path.exists(path):
+        fileList = await asyncio.to_thread(folder_handle, path, recursive, metaInfoOnly)
+    else:
+        path = os.path.join(get_default_workflows_dir(), reqJson['path'])
         fileList.extend(await asyncio.to_thread(folder_handle, path, recursive, metaInfoOnly))
     return web.Response(text=json.dumps(fileList), content_type='application/json')
 
